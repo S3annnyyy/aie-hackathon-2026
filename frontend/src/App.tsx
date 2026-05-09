@@ -4,6 +4,7 @@ import { AppLayout } from './layouts/AppLayout'
 import { LandingLayout } from './layouts/LandingLayout'
 import DesignerPage from './pages/DesignerPage'
 import ExplorePage from './pages/ExplorePage'
+import InteriorPage from './pages/InteriorPage'
 import LandingPage from './pages/LandingPage'
 
 export default function App() {
@@ -12,6 +13,7 @@ export default function App() {
       <Routes>
         <Route element={<LandingLayout />}>
           <Route index element={<LandingPage />} />
+          <Route path="/interior" element={<InteriorPage />} />
         </Route>
         <Route element={<AppLayout />}>
           <Route path="/explore" element={<ExplorePage />} />

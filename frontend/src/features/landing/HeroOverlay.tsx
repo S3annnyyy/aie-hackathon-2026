@@ -44,7 +44,7 @@ export function HeroOverlay({ scrollFade }: HeroOverlayProps) {
 
       <div className="pointer-events-auto max-w-3xl">
         <h1 className="font-[family-name:var(--font-display)] text-5xl font-semibold leading-[1.02] tracking-tight text-cream md:text-[6.5rem]">
-          See inside <span className="italic text-terracotta">before</span>
+          See around <span className="italic text-terracotta">before</span>
           <br />
           you move in.
         </h1>

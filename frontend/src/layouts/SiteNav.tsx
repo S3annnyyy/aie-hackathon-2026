@@ -23,7 +23,7 @@ export function SiteNav() {
             StackView
           </span>
           <span className="hidden text-xs uppercase tracking-[0.22em] text-subtle md:inline">
-            See inside before you move in
+            See around before you move in
           </span>
         </NavLink>
 
