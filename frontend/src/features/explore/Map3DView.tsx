@@ -4,16 +4,24 @@ import { useEffect, useRef, useState } from 'react'
 const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined
 const MAP_ID = import.meta.env.VITE_GOOGLE_3D_MAP_ID as string | undefined
 const FLOOR_HEIGHT_METERS = 3.2
+const GROUND_CLEARANCE_METERS = 1.5 // pilotis / void deck allowance
 
+/**
+ * Heading is the compass bearing the camera *looks along*. If a unit "faces
+ * North", the resident looks north out of their window — so the Google 3D
+ * camera should point north as well (heading = 0°).
+ *
+ * Google Maps 3D alpha interprets heading as 0° = North, 90° = East.
+ */
 const HEADING_BY_FACING: Record<string, number> = {
-  North: 180,
-  'North-East': 225,
-  East: 270,
-  'South-East': 315,
-  South: 0,
-  'South-West': 45,
-  West: 90,
-  'North-West': 135,
+  North: 0,
+  'North-East': 45,
+  East: 90,
+  'South-East': 135,
+  South: 180,
+  'South-West': 225,
+  West: 270,
+  'North-West': 315,
 }
 
 type Map3DViewProps = {
@@ -73,24 +81,47 @@ export function Map3DView({ lat, lng, stackLabel, facing }: Map3DViewProps) {
 
   // Drive the camera based on prop changes (unit/stack/facing).
   useEffect(() => {
-    const element = elementRef.current as unknown as
-      | {
-          center?: { lat: number; lng: number; altitude?: number }
-          heading?: number
-          tilt?: number
-          range?: number
-        }
-      | null
+    type MapElement = {
+      center?: { lat: number; lng: number; altitude?: number }
+      heading?: number
+      tilt?: number
+      range?: number
+      cameraPosition?: { lat: number; lng: number; altitude?: number }
+    }
+    const element = elementRef.current as unknown as MapElement | null
     if (!element || !ready) return
 
     const midLevel = parseStackMid(stackLabel) ?? 20
-    const altitude = midLevel * FLOOR_HEIGHT_METERS
-    const heading = HEADING_BY_FACING[facing] ?? 0
+    const headingDeg = HEADING_BY_FACING[facing] ?? 0
 
-    element.center = { lat, lng, altitude }
-    element.heading = heading
-    element.tilt = 72
+    // Eye altitude in meters above ellipsoid. Google 3D maps uses
+    // AltitudeMode.ABSOLUTE by default, which is close enough to "metres
+    // above sea level" that ~floor offset sits the camera correctly above
+    // the block footprint at this latitude.
+    const unitAltitude = GROUND_CLEARANCE_METERS + midLevel * FLOOR_HEIGHT_METERS
+
+    // Place the look-at ~200m ahead of the block along the facing direction
+    // at the same altitude, so the camera parallels the ground from the
+    // window outward — matching the resident's horizon line.
+    const LOOK_AHEAD_METERS = 220
+    const target = offsetLatLng(lat, lng, headingDeg, LOOK_AHEAD_METERS)
+
+    element.center = { lat: target.lat, lng: target.lng, altitude: unitAltitude }
+    element.heading = headingDeg
+    // 85° tilt = almost level, slight downward for context
+    element.tilt = 85
+    // Pull the camera back ~180m from the look-at; combined with the nudge
+    // below, that places it just off the window at the correct level.
     element.range = 180
+
+    // If the element supports explicit camera position, use it for precision.
+    if ('cameraPosition' in element) {
+      try {
+        element.cameraPosition = { lat, lng, altitude: unitAltitude }
+      } catch {
+        // Older/alpha builds ignore direct assignment; fall back to center/range.
+      }
+    }
   }, [lat, lng, stackLabel, facing, ready])
 
   if (error) {
@@ -141,4 +172,26 @@ function parseStackMid(label: string): number | null {
   const to = Number(match[2])
   if (!Number.isFinite(from) || !Number.isFinite(to)) return null
   return Math.round((from + to) / 2)
+}
+
+/**
+ * Move a lat/lng by `distanceMeters` along a compass `headingDeg` (0 = N).
+ * Flat-earth approximation — accurate to a few centimetres at Singapore
+ * latitudes for distances under a kilometre.
+ */
+function offsetLatLng(
+  lat: number,
+  lng: number,
+  headingDeg: number,
+  distanceMeters: number,
+): { lat: number; lng: number } {
+  const metersPerDegLat = 111_320
+  const metersPerDegLng = 111_320 * Math.cos((lat * Math.PI) / 180)
+  const headingRad = (headingDeg * Math.PI) / 180
+  const north = Math.cos(headingRad) * distanceMeters
+  const east = Math.sin(headingRad) * distanceMeters
+  return {
+    lat: lat + north / metersPerDegLat,
+    lng: lng + east / metersPerDegLng,
+  }
 }

@@ -3,9 +3,8 @@
  * and the Explore page. Shape mirrors a typical public resale listing so we
  * can extend this to user-parsed URLs later without reshaping callers.
  *
- * Source: web-scraped resale listing for 105A Depot Road (picked because it
- * is rendered in Google 3D Maps' photorealistic tile set — the unit-view
- * camera actually lands on a building, not a grey block).
+ * Source: web-scraped resale listing for 90A Telok Blangah Street 31.
+ * Coordinates verified against OneMap Singapore (authoritative).
  */
 
 export type FloorStackBand = {
@@ -50,42 +49,45 @@ export type ResaleListing = {
 }
 
 export const SAMPLE_LISTING: ResaleListing = {
-  id: '500114919',
-  address: '105A Depot Road',
-  block: '105A',
-  street: 'Depot Road',
-  postal: '102105',
-  coordinates: { lat: 1.27985, lng: 103.80476 },
+  id: '500077059',
+  address: '90A Telok Blangah Street 31',
+  block: '90A',
+  street: 'Telok Blangah Street 31',
+  postal: '101090',
+  // OneMap-verified coordinates for the block footprint.
+  coordinates: { lat: 1.2777346, lng: 103.8070933 },
   flatType: '4 Room Flat',
   bedrooms: 3,
   bathrooms: 2,
-  areaSqft: 990,
-  priceSgd: 868_000,
-  psfSgd: 877,
+  areaSqft: 1001,
+  priceSgd: 933_000,
+  psfSgd: 932,
   negotiable: true,
-  topYear: 2016,
+  topYear: 2018,
   leaseYears: 99,
   listedOn: '2026-05-08',
-  listingUrl: 'https://www.propertyguru.com.sg/listing/hdb-for-sale-105a-depot-road-500114919',
-  agent: { name: 'Kenny Ter', agency: 'PROPNEX REALTY PTE. LTD.' },
-  // Listing copy: "highly coveted North-South facing, Zero West sun".
+  listingUrl: 'https://www.propertyguru.com.sg/listing/hdb-for-sale-90a-telok-blangah-street-31-500077059',
+  agent: { name: 'Lin Sallee 林玥廷', agency: 'HUTTONS ASIA PTE LTD' },
   facingCandidates: ['North', 'North-East', 'East', 'South-East', 'South'],
+  // This listing has no published transaction history on the source page, so
+  // we seed plausible stack bands for a typical ~40-storey Telok Blangah block
+  // to keep the stack picker meaningful for the demo.
   floorStack: [
-    { label: '04 to 06', recentSale: { date: 'Apr 2025', priceSgd: 800_000, psfSgd: 808 } },
-    { label: '07 to 09', recentSale: { date: 'Dec 2025', priceSgd: 836_000, psfSgd: 844 } },
-    { label: '10 to 12', recentSale: { date: 'Sep 2025', priceSgd: 815_000, psfSgd: 823 } },
-    { label: '13 to 15', recentSale: { date: 'Feb 2026', priceSgd: 845_000, psfSgd: 853 } },
+    { label: '07 to 09' },
+    { label: '13 to 15' },
+    { label: '19 to 21' },
+    { label: '25 to 27' },
+    { label: '31 to 33' },
   ],
   nearestTransit: [
-    { code: 'EW18', name: 'Redhill MRT', walkMinutes: 15, distanceMeters: 1100 },
-    { code: 'CC27', name: 'Labrador Park MRT', walkMinutes: 10, distanceMeters: 750 },
-    { code: 'CC28', name: 'Telok Blangah MRT', walkMinutes: 12, distanceMeters: 900 },
+    { code: 'CC28', name: 'Telok Blangah MRT', walkMinutes: 8, distanceMeters: 670 },
+    { code: 'CC27', name: 'Labrador Park MRT', walkMinutes: 11, distanceMeters: 880 },
   ],
   highlights: [
-    'Squarish 990 sqft layout, three intact bedrooms',
-    'Rare "young flat" — TOP 2016, ~90 years left on the lease',
-    'North–South facing, zero West sun',
-    'Depot Heights mall + NTUC at the doorstep',
+    'Minutes to Telok Blangah MRT (Circle Line) and HarbourFront',
+    'Close to Mount Faber Park, Southern Ridges, VivoCity',
+    'Greater Southern Waterfront upside potential',
+    'TOP Dec 2018 · 99-year lease · minimal build-in, ready for renovation',
   ],
 }
 
