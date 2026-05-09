@@ -1,9 +1,10 @@
 import { Environment, Html, useGLTF } from '@react-three/drei'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Component, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import * as THREE from 'three'
 
-import type { EnvironmentData, LayoutSchema, Opening, Room, SolarSample, Wall } from '../../lib/api'
+import type { EnvironmentData, LayoutSchema, Room, SolarSample, Wall } from '../../lib/api'
 
 type Props = {
   glbUrl: string | null
@@ -40,6 +41,7 @@ type WindowPortal = {
   position: THREE.Vector3
   width: number
   height: number
+  normal: THREE.Vector3
   inferred: boolean
 }
 
@@ -70,6 +72,10 @@ const LOOK_SENSITIVITY = 0.0022
 const CAMERA_CLEARANCE = 0.18
 const TRANSITION_SECONDS = 0.9
 const FLOOR_HEIGHT = -0.12
+const SUN_PATCH_Y = 0.075
+const SUN_MODEL_CLEARANCE = 2.4
+const SUN_VISUAL_ORBIT_MULTIPLIER = 0.92
+const SUN_LIGHT_ORBIT_MULTIPLIER = 1.65
 const WINDOW_SILL_HEIGHT = 0.88
 const OVERVIEW_ROTATION_SPEED = 0.12
 const INITIAL_OVERVIEW_ANGLE = Math.PI / 4
@@ -80,6 +86,7 @@ const FLOOR_TONE = '#786d60'
 const FLOOR_TONE_DEEP = '#675b4f'
 const MIN_WIND_ARROW_LENGTH = 1.6
 const MAX_WIND_ARROW_LENGTH = 5.2
+const DAY_ANIMATION_INDEXES_PER_SECOND = 1.15
 
 type Opening = {
   id: string
@@ -159,6 +166,24 @@ function minutesOfDay(value: string): number {
   return Number(hour) * 60 + Number(minute)
 }
 
+function timeAtMinutes(template: string, minutes: number): string {
+  const clamped = Math.max(0, Math.min(23 * 60 + 59, Math.round(minutes)))
+  const hour = Math.floor(clamped / 60).toString().padStart(2, '0')
+  const minute = (clamped % 60).toString().padStart(2, '0')
+  const datePrefix = template.includes('T') ? `${template.split('T')[0]}T` : ''
+  return `${datePrefix}${hour}:${minute}`
+}
+
+function sunVectorFromAzEl(azimuth: number, elevation: number): THREE.Vector3 {
+  const elevationRad = (Math.max(elevation, 3) * Math.PI) / 180
+  const flat = compassVector(azimuth)
+  return new THREE.Vector3(
+    flat.x * Math.cos(elevationRad),
+    Math.sin(elevationRad),
+    flat.z * Math.cos(elevationRad),
+  ).normalize()
+}
+
 function nearestSolarSample(env: EnvironmentData): SolarSample | null {
   const samples = env.solar_samples ?? []
   if (!samples.length) return null
@@ -180,20 +205,60 @@ function interpolateSolarSample(samples: SolarSample[], index: number): SunMomen
   if (!upper || upper.time < lower.time) return lower
 
   return {
-    time: t < 0.5 ? lower.time : upper.time,
+    time: timeAtMinutes(lower.time, THREE.MathUtils.lerp(minutesOfDay(lower.time), minutesOfDay(upper.time), t)),
     solar_azimuth: lerpCompassDegrees(lower.solar_azimuth, upper.solar_azimuth, t),
     solar_elevation: THREE.MathUtils.lerp(lower.solar_elevation, upper.solar_elevation, t),
   }
 }
 
-function openingToPortal(opening: Opening, ppm: number): WindowPortal | null {
+function findOpeningWall(opening: Opening, walls: Wall[], ppm: number): Wall | null {
+  if (opening.wall_id) {
+    const direct = walls.find((wall) => wall.id === opening.wall_id)
+    if (direct) return direct
+  }
+
+  const center = toWorldPoint(opening.center, ppm)
+  let bestWall: Wall | null = null
+  let bestDistance = Number.POSITIVE_INFINITY
+  for (const wall of walls) {
+    const start = toWorldPoint(wall.start, ppm)
+    const end = toWorldPoint(wall.end, ppm)
+    const distance = distancePointToSegmentSquared(center, start, end)
+    if (distance < bestDistance) {
+      bestDistance = distance
+      bestWall = wall
+    }
+  }
+  return bestWall
+}
+
+function exteriorWallNormal(wall: Wall, portalPosition: THREE.Vector3, bounds: Bounds, ppm: number): THREE.Vector3 {
+  const start = toWorldPoint(wall.start, ppm)
+  const end = toWorldPoint(wall.end, ppm)
+  const along = new THREE.Vector3(end.x - start.x, 0, end.z - start.z)
+  if (along.lengthSq() <= 1e-6) return new THREE.Vector3(0, 0, -1)
+  along.normalize()
+
+  const normalA = new THREE.Vector3(-along.z, 0, along.x).normalize()
+  const normalB = normalA.clone().negate()
+  const layoutCenter = new THREE.Vector3(bounds.centerX, 0, bounds.centerZ)
+  const outwardProbe = portalPosition.clone().sub(layoutCenter).setY(0)
+  if (outwardProbe.lengthSq() <= 1e-6) return normalA
+  return normalA.dot(outwardProbe) >= normalB.dot(outwardProbe) ? normalA : normalB
+}
+
+function openingToPortal(opening: Opening, ppm: number, walls: Wall[], bounds: Bounds): WindowPortal | null {
   if (opening.center.length < 2) return null
   const center = toWorldPoint(opening.center, ppm)
+  const height = Math.max(opening.height_m || 1.2, 0.75)
+  const position = new THREE.Vector3(center.x, FLOOR_HEIGHT + WINDOW_SILL_HEIGHT + height / 2, center.z)
+  const wall = findOpeningWall(opening, walls, ppm)
   return {
     id: opening.id,
-    position: new THREE.Vector3(center.x, 1.15, center.z),
+    position,
     width: Math.max(opening.width_m || 1.1, 0.75),
-    height: Math.max(opening.height_m || 1.2, 0.75),
+    height,
+    normal: wall ? exteriorWallNormal(wall, position, bounds, ppm) : position.clone().sub(new THREE.Vector3(bounds.centerX, 0, bounds.centerZ)).setY(0).normalize(),
     inferred: false,
   }
 }
@@ -213,20 +278,19 @@ function inferSunEdgePortals(bounds: Bounds, sunFlat: THREE.Vector3): WindowPort
     position: edgeCenter.clone().add(across.clone().multiplyScalar(offset * spread)).setY(1.15),
     width: 1.15,
     height: 1.2,
+    normal: sunFlat.clone(),
     inferred: true,
   }))
 }
 
 function getSunFacingPortals(schema: LayoutSchema | null, ppm: number, bounds: Bounds, sunFlat: THREE.Vector3): WindowPortal[] {
-  const center = new THREE.Vector3(bounds.centerX, 0, bounds.centerZ)
   const portals = (schema?.windows ?? [])
-    .map((opening) => openingToPortal(opening, ppm))
+    .map((opening) => openingToPortal(opening, ppm, schema?.walls ?? [], bounds))
     .filter((portal): portal is WindowPortal => Boolean(portal))
 
   if (!portals.length) return inferSunEdgePortals(bounds, sunFlat)
 
-  const facing = portals.filter((portal) => portal.position.clone().sub(center).dot(sunFlat) >= -0.15)
-  return facing.length ? facing : portals
+  return portals.filter((portal) => portal.normal.dot(sunFlat) > 0.12)
 }
 
 function clampVectorToBounds(point: THREE.Vector3, bounds: Bounds, margin = 0.25): THREE.Vector3 {
@@ -693,7 +757,7 @@ function WindowOverlay({ windows, walls, ppm }: { windows: Opening[]; walls: Wal
 
         return (
           <group key={opening.id} position={[center.x, y, center.z]} rotation={[0, -angle, 0]}>
-            <mesh castShadow receiveShadow>
+            <mesh receiveShadow>
               <boxGeometry args={[width * 1.12, height * 1.12, depth]} />
               <meshStandardMaterial
                 color="#8b9095"
@@ -705,7 +769,7 @@ function WindowOverlay({ windows, walls, ppm }: { windows: Opening[]; walls: Wal
                 polygonOffsetUnits={2}
               />
             </mesh>
-            <mesh castShadow receiveShadow position={[0, 0, 0.001]}>
+            <mesh receiveShadow position={[0, 0, 0.001]}>
               <boxGeometry args={[width * 0.82, height * 0.82, Math.max(0.012, depth * 0.22)]} />
               <meshPhysicalMaterial
                 color="#d9e3eb"
@@ -793,7 +857,8 @@ function AlignedGlbModel({ url, anchor }: { url: string; anchor: THREE.Vector3 }
     scene.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh
-        mesh.castShadow = true
+        const isGlassPane = mesh.name.startsWith('window::')
+        mesh.castShadow = !isGlassPane
         mesh.receiveShadow = true
 
         const kind = classifyInteriorSurface(mesh)
@@ -965,6 +1030,40 @@ function SunDirectionalLight({
   )
 }
 
+function SunModel({ position, strength }: { position: THREE.Vector3; strength: number }) {
+  const groupRef = useRef<THREE.Group>(null)
+  const size = THREE.MathUtils.lerp(0.34, 0.52, strength)
+
+  useFrame((state) => {
+    if (!groupRef.current) return
+    groupRef.current.rotation.y = state.clock.elapsedTime * 0.18
+    const pulse = 1 + Math.sin(state.clock.elapsedTime * 2.2) * 0.045
+    groupRef.current.scale.setScalar(pulse)
+  })
+
+  return (
+    <group ref={groupRef} position={[position.x, position.y, position.z]}>
+      <pointLight color="#fbbf24" intensity={1.25 + strength * 1.4} distance={5.5} decay={1.7} />
+      <mesh>
+        <sphereGeometry args={[size, 48, 48]} />
+        <meshStandardMaterial color="#facc15" emissive="#f59e0b" emissiveIntensity={1.9 + strength} roughness={0.34} metalness={0.02} />
+      </mesh>
+      <mesh>
+        <sphereGeometry args={[size * 1.72, 48, 48]} />
+        <meshBasicMaterial color="#fde68a" transparent opacity={0.18 + strength * 0.08} depthWrite={false} />
+      </mesh>
+      <mesh rotation={[Math.PI / 2.6, 0, 0]}>
+        <torusGeometry args={[size * 1.38, size * 0.025, 8, 72]} />
+        <meshBasicMaterial color="#fef3c7" transparent opacity={0.55} />
+      </mesh>
+      <mesh rotation={[0, Math.PI / 2.8, Math.PI / 5]}>
+        <torusGeometry args={[size * 1.18, size * 0.02, 8, 72]} />
+        <meshBasicMaterial color="#fef3c7" transparent opacity={0.72} />
+      </mesh>
+    </group>
+  )
+}
+
 function EnvironmentSceneOverlay({
   env,
   schema,
@@ -1000,34 +1099,76 @@ function EnvironmentSceneOverlay({
   const solarElevation = Math.max(sunMoment.solar_elevation, 3)
   const solarElevationRad = (solarElevation * Math.PI) / 180
   const sunFlat = compassVector(sunMoment.solar_azimuth)
-  const sunVector = new THREE.Vector3(
-    sunFlat.x * Math.cos(solarElevationRad),
-    Math.sin(solarElevationRad),
-    sunFlat.z * Math.cos(solarElevationRad),
-  ).normalize()
-  const sunOrigin = center.clone().add(sunVector.clone().multiplyScalar(radius * 1.35))
+  const sunVector = sunVectorFromAzEl(sunMoment.solar_azimuth, solarElevation)
+  const maxWallHeight = Math.max(...(schema?.walls ?? []).map((wall) => wall.height_m), 2.8)
+  const sunMinY = FLOOR_HEIGHT + maxWallHeight + SUN_MODEL_CLEARANCE
+  const sunLightDistance = Math.max(radius * SUN_LIGHT_ORBIT_MULTIPLIER, (sunMinY - center.y) / Math.max(sunVector.y, 0.08))
+  const sunLightOrigin = center.clone().add(sunVector.clone().multiplyScalar(sunLightDistance))
+  const sunVisualDistance = radius * SUN_VISUAL_ORBIT_MULTIPLIER
+  const sunVisualOrigin = center.clone().add(sunVector.clone().multiplyScalar(sunVisualDistance))
+  sunVisualOrigin.y = Math.max(sunVisualOrigin.y, sunMinY)
   const sunRayDirection = sunVector.clone().negate()
-  const sunAcross = new THREE.Vector3(-sunRayDirection.z, 0, sunRayDirection.x).normalize()
-  const sunFloorDirection = new THREE.Vector3(sunRayDirection.x, 0, sunRayDirection.z).normalize()
   const sunPortals = useMemo(() => getSunFacingPortals(schema, ppm, bounds, sunFlat), [schema, ppm, bounds, sunFlat])
-  const beamLength = radius * 1.35
-  const beamOpacity = THREE.MathUtils.clamp(sunMoment.solar_elevation / 55, 0.14, 0.5)
+  const sunPathPoints = useMemo(
+    () =>
+      (env.solar_samples ?? [])
+        .filter((sample) => sample.solar_elevation > 0)
+        .map((sample) => {
+          const sampleVector = sunVectorFromAzEl(sample.solar_azimuth, sample.solar_elevation)
+          const point = center.clone().add(sampleVector.clone().multiplyScalar(radius * SUN_VISUAL_ORBIT_MULTIPLIER))
+          point.y = Math.max(point.y, sunMinY)
+          return point
+        }),
+    [center, env.solar_samples, radius, sunMinY],
+  )
+  const sunPathGeometry = useMemo(() => new THREE.BufferGeometry().setFromPoints(sunPathPoints), [sunPathPoints])
+  const sunPathLine = useMemo(
+    () =>
+      new THREE.Line(
+        sunPathGeometry,
+        new THREE.LineBasicMaterial({
+          color: '#fbbf24',
+          transparent: true,
+          opacity: 0.46,
+        }),
+      ),
+    [sunPathGeometry],
+  )
   const isNight = sunMoment.solar_elevation <= 0
+  const sunStrength = isNight ? 0.03 : THREE.MathUtils.clamp(sunMoment.solar_elevation / 48, 0.38, 1)
+  const sunLightIntensity = isNight ? 0.08 : THREE.MathUtils.lerp(0.75, 1.85, sunStrength)
   const sunTimeLabel = formatLocalTime(sunMoment.time)
+
+  useEffect(
+    () => () => {
+      sunPathGeometry.dispose()
+      const material = sunPathLine.material
+      if (Array.isArray(material)) {
+        material.forEach((entry) => entry.dispose())
+      } else {
+        material.dispose()
+      }
+    },
+    [sunPathGeometry, sunPathLine],
+  )
 
   return (
     <group>
       <SunDirectionalLight
-        position={sunOrigin.clone().setY(sunOrigin.y + 2)}
+        position={sunLightOrigin}
         target={center}
-        intensity={isNight ? 0.12 : 1.35}
+        intensity={sunLightIntensity}
         color={isNight ? '#9ca3af' : '#ffd166'}
         castShadow={!isNight}
       />
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[center.x, 0.05, center.z]}>
-        <ringGeometry args={[radius * 0.98, radius, 96]} />
-        <meshBasicMaterial color="#7ad6cc" transparent opacity={0.2} side={THREE.DoubleSide} />
-      </mesh>
+      {false && !isNight ? <SunModel position={sunVisualOrigin} strength={sunStrength} /> : null}
+      {false && sunPathPoints.length > 1 ? <primitive object={sunPathLine} /> : null}
+      {false ? (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[center.x, 0.05, center.z]}>
+          <ringGeometry args={[radius * 0.98, radius, 96]} />
+          <meshBasicMaterial color="#7ad6cc" transparent opacity={0.2} side={THREE.DoubleSide} />
+        </mesh>
+      ) : null}
       {compassLabels.map(({ label, direction }) => (
         <Html
           key={label}
@@ -1040,47 +1181,51 @@ function EnvironmentSceneOverlay({
         </Html>
       ))}
 
-      {!isNight && sunPortals.map((portal) => {
-        const beamStart = portal.position.clone().add(sunRayDirection.clone().multiplyScalar(-0.25))
-        const floorRun = THREE.MathUtils.clamp(portal.position.y / Math.tan(solarElevationRad), 0.45, radius * 1.1)
-        const patchLength = THREE.MathUtils.clamp(portal.height / Math.tan(solarElevationRad), 0.8, radius * 0.9)
-        const rawPatchCenter = portal.position.clone().add(sunFloorDirection.clone().multiplyScalar(floorRun + patchLength * 0.5)).setY(0.08)
+      {false && !isNight && sunPortals.map((portal) => {
+        const directness = THREE.MathUtils.clamp((portal.normal.dot(sunFlat) - 0.12) / 0.7, 0, 1)
+        const floorTravel = (portal.position.y - SUN_PATCH_Y) / Math.max(0.08, -sunRayDirection.y)
+        const rawPatchCenter = portal.position.clone().add(sunRayDirection.clone().multiplyScalar(floorTravel)).setY(SUN_PATCH_Y)
         const patchCenter = clampVectorToBounds(rawPatchCenter, bounds, 0.35)
+        const clampFade = THREE.MathUtils.clamp(1 - rawPatchCenter.distanceTo(patchCenter) / Math.max(radius * 0.45, 1), 0, 1)
+        const patchLength = THREE.MathUtils.clamp(portal.height / Math.tan(solarElevationRad), 0.8, radius * 1.35)
+        const patchWidth = THREE.MathUtils.clamp(
+          portal.width / Math.max(0.35, directness),
+          portal.width * 0.9,
+          portal.width * 2.6,
+        )
+        const patchOpacity = THREE.MathUtils.clamp(0.1 + sunStrength * directness * clampFade * 0.34, 0, 0.46)
         const beamAngle = Math.atan2(sunRayDirection.x, sunRayDirection.z)
+        if (patchOpacity <= 0.03) return null
         return (
           <group key={portal.id}>
-            <mesh position={[portal.position.x, portal.position.y, portal.position.z]} rotation={[0, beamAngle, 0]}>
-              <boxGeometry args={[portal.width, portal.height, 0.06]} />
-              <meshBasicMaterial color={portal.inferred ? '#fcd34d' : '#fde68a'} transparent opacity={0.52} />
-            </mesh>
-            <arrowHelper args={[sunRayDirection, beamStart, beamLength, '#f59e0b', 0.34, 0.22]} />
-            <mesh position={[patchCenter.x, patchCenter.y, patchCenter.z]} rotation={[-Math.PI / 2, 0, -beamAngle]}>
-              <planeGeometry args={[portal.width * 1.55, patchLength]} />
-              <meshBasicMaterial color="#fbbf24" transparent opacity={beamOpacity} side={THREE.DoubleSide} />
+            <mesh
+              position={[patchCenter.x, patchCenter.y + 0.002, patchCenter.z]}
+              rotation={[-Math.PI / 2, 0, -beamAngle]}
+              scale={[patchWidth * 0.92, patchLength * 0.72, 1]}
+            >
+              <circleGeometry args={[1, 64]} />
+              <meshBasicMaterial color="#fde68a" transparent opacity={patchOpacity * 0.35} depthWrite={false} side={THREE.DoubleSide} />
             </mesh>
             <mesh
-              position={[
-                patchCenter.x + sunAcross.x * portal.width * 0.9,
-                0.09,
-                patchCenter.z + sunAcross.z * portal.width * 0.9,
-              ]}
+              position={[patchCenter.x, patchCenter.y + 0.004, patchCenter.z]}
               rotation={[-Math.PI / 2, 0, -beamAngle]}
+              scale={[patchWidth * 0.5, patchLength * 0.5, 1]}
             >
-              <planeGeometry args={[portal.width * 0.32, patchLength * 0.95]} />
-              <meshBasicMaterial color="#111827" transparent opacity={0.18} side={THREE.DoubleSide} />
+              <circleGeometry args={[1, 64]} />
+              <meshBasicMaterial color="#fbbf24" transparent opacity={patchOpacity} depthWrite={false} side={THREE.DoubleSide} />
             </mesh>
           </group>
         )
       })}
 
-      <Html position={[sunOrigin.x, sunOrigin.y + 0.4, sunOrigin.z]} center distanceFactor={9} style={{ pointerEvents: 'none' }}>
+      <Html position={[sunVisualOrigin.x, sunVisualOrigin.y + 0.7, sunVisualOrigin.z]} center distanceFactor={9} style={{ pointerEvents: 'none' }}>
         <div className="scene-factor-label">
           <strong>{isNight ? 'No direct sun' : 'Shadow sim'}</strong>
           <span>{sunTimeLabel} - sun from {compassDirLabel(sunMoment.solar_azimuth)}, {sunMoment.solar_elevation.toFixed(0)} deg high</span>
         </div>
       </Html>
 
-      {windOffsets.map((offset, index) => {
+      {false && windOffsets.map((offset, index) => {
         const origin = windStart.clone().add(windAcross.clone().multiplyScalar(offset)).setY(0.7 + index * 0.12)
         return <arrowHelper key={offset} args={[windTo, origin, windArrowLength, '#38bdf8', 0.35, 0.22]} />
       })}
@@ -1154,7 +1299,7 @@ function SunSimulatorPanel({
               <button
                 key={sample.time}
                 type="button"
-                className={sample.time === activeTime ? 'active' : ''}
+                className={(isPlaying ? Math.round(sampleIndex) === index : sample.time === activeTime || Math.round(sampleIndex) === index) ? 'active' : ''}
                 onClick={() => onSelectSample(sample, index)}
                 title={`${sample.solar_elevation.toFixed(0)} deg elevation, ${sample.solar_azimuth.toFixed(0)} deg azimuth`}
               >
@@ -1397,6 +1542,8 @@ export function Viewer3D({ glbUrl, schema, environment }: Props) {
   const [selectedSunTime, setSelectedSunTime] = useState<string | null>(null)
   const [isSunPlaying, setIsSunPlaying] = useState(false)
   const [sunSampleIndex, setSunSampleIndex] = useState(0)
+  const [hudDashboardRoot, setHudDashboardRoot] = useState<HTMLElement | null>(null)
+  const sunAnimationFrame = useRef<number | null>(null)
   const pointerLockTarget = useRef<HTMLCanvasElement | null>(null)
   const currentPoseRef = useRef({
     position: new THREE.Vector3(),
@@ -1429,7 +1576,7 @@ export function Viewer3D({ glbUrl, schema, environment }: Props) {
   )
   const sunMoment = useMemo<SunMoment | null>(() => {
     if (!environment) return null
-    if (isSunPlaying && daylightSamples.length) {
+    if (daylightSamples.length && (isSunPlaying || selectedSunTime)) {
       return interpolateSolarSample(daylightSamples, sunSampleIndex)
     }
     const selectedSample = daylightSamples.find((sample) => sample.time === selectedSunTime)
@@ -1440,7 +1587,18 @@ export function Viewer3D({ glbUrl, schema, environment }: Props) {
       solar_elevation: environment.solar_elevation,
     }
   }, [daylightSamples, environment, isSunPlaying, selectedSunTime, sunSampleIndex])
-  const activeSunTime = isSunPlaying && sunMoment ? sunMoment.time : selectedSunTime
+  const activeSunTime = sunMoment?.time ?? selectedSunTime
+
+  useEffect(() => {
+    const syncHudDashboardRoot = () => {
+      setHudDashboardRoot(document.getElementById('viewer-hud-dashboard-root'))
+    }
+
+    syncHudDashboardRoot()
+    const observer = new MutationObserver(syncHudDashboardRoot)
+    observer.observe(document.body, { childList: true, subtree: true })
+    return () => observer.disconnect()
+  }, [])
 
   useEffect(() => {
     setSelectedRoomId(null)
@@ -1472,10 +1630,26 @@ export function Viewer3D({ glbUrl, schema, environment }: Props) {
 
   useEffect(() => {
     if (!isSunPlaying || daylightSamples.length < 2) return
-    const interval = window.setInterval(() => {
-      setSunSampleIndex((current) => (current + 0.08) % daylightSamples.length)
-    }, 80)
-    return () => window.clearInterval(interval)
+    let lastTime = performance.now()
+    const maxIndex = daylightSamples.length - 1
+
+    const animateDay = (now: number) => {
+      const deltaSeconds = Math.min((now - lastTime) / 1000, 0.12)
+      lastTime = now
+      setSunSampleIndex((current) => {
+        const next = current + deltaSeconds * DAY_ANIMATION_INDEXES_PER_SECOND
+        return next >= maxIndex ? 0 : next
+      })
+      sunAnimationFrame.current = window.requestAnimationFrame(animateDay)
+    }
+
+    sunAnimationFrame.current = window.requestAnimationFrame(animateDay)
+    return () => {
+      if (sunAnimationFrame.current !== null) {
+        window.cancelAnimationFrame(sunAnimationFrame.current)
+        sunAnimationFrame.current = null
+      }
+    }
   }, [daylightSamples.length, isSunPlaying])
 
   const enterWalkthrough = (room: Room) => {
@@ -1538,13 +1712,13 @@ export function Viewer3D({ glbUrl, schema, environment }: Props) {
           >
           <color attach="background" args={['#d3d5d6']} />
           <fog attach="fog" args={['#ccd0d2', 26, 120]} />
-          <ambientLight intensity={0.32} />
-          <hemisphereLight intensity={0.42} color="#f2f0ea" groundColor="#7b7367" />
+          <ambientLight intensity={environment ? 0.14 : 0.32} />
+          <hemisphereLight intensity={environment ? 0.24 : 0.42} color="#f2f0ea" groundColor="#7b7367" />
           <directionalLight
             position={[sceneAnchor.x + bounds.width * 0.45, Math.max(bounds.width, bounds.depth) * 1.8 + 12, sceneAnchor.z + bounds.depth * 0.25]}
-            intensity={environment ? 0.36 : 1.26}
+            intensity={environment ? 0.08 : 1.26}
             color="#fff6e6"
-            castShadow
+            castShadow={!environment}
             shadow-mapSize-width={2048}
             shadow-mapSize-height={2048}
             shadow-camera-near={0.1}
@@ -1556,7 +1730,7 @@ export function Viewer3D({ glbUrl, schema, environment }: Props) {
             shadow-bias={-0.0002}
             shadow-normalBias={0.035}
           />
-          <directionalLight position={[sceneAnchor.x - 18, 16, sceneAnchor.z - 14]} intensity={0.14} color="#d7dde4" />
+          <directionalLight position={[sceneAnchor.x - 18, 16, sceneAnchor.z - 14]} intensity={environment ? 0.04 : 0.14} color="#d7dde4" />
           <Environment preset="city" background={false} />
           <FloorPlane bounds={bounds} />
           <SceneRig
@@ -1642,7 +1816,9 @@ export function Viewer3D({ glbUrl, schema, environment }: Props) {
           </p>
         </div>
 
-        <div className="viewer-hint viewer-hint-bottom">
+        {modelError ? <div className="viewer-error">{modelError}</div> : null}
+        {hudDashboardRoot ? createPortal(
+          <div className="viewer-dashboard">
           {selectedRoom ? (
             <div className="viewer-room-card">
               <strong>{selectedRoom.name}</strong>
@@ -1658,31 +1834,36 @@ export function Viewer3D({ glbUrl, schema, environment }: Props) {
               <div className="muted">Collision uses the exported wall schema and floor-plane bounds.</div>
             </div>
           )}
-        </div>
-
-        {modelError ? <div className="viewer-error">{modelError}</div> : null}
-        {environment ? (
-          <SunSimulatorPanel
-            environment={environment}
-            samples={daylightSamples}
-            sunMoment={sunMoment}
-            isPlaying={isSunPlaying}
-            sampleIndex={sunSampleIndex}
-            activeTime={activeSunTime}
-            usesDetectedWindows={Boolean(schema?.windows?.length)}
-            onPlayToggle={() => setIsSunPlaying((playing) => !playing)}
-            onScrub={(nextIndex) => {
-              const nextSample = daylightSamples[Math.round(nextIndex)]
-              setIsSunPlaying(false)
-              setSunSampleIndex(nextIndex)
-              setSelectedSunTime(nextSample?.time ?? null)
-            }}
-            onSelectSample={(sample, index) => {
-              setIsSunPlaying(false)
-              setSunSampleIndex(index)
-              setSelectedSunTime(sample.time)
-            }}
-          />
+          {environment ? (
+            <SunSimulatorPanel
+              environment={environment}
+              samples={daylightSamples}
+              sunMoment={sunMoment}
+              isPlaying={isSunPlaying}
+              sampleIndex={sunSampleIndex}
+              activeTime={activeSunTime}
+              usesDetectedWindows={Boolean(schema?.windows?.length)}
+              onPlayToggle={() => {
+                if (isSunPlaying) {
+                  setSelectedSunTime(sunMoment?.time ?? selectedSunTime)
+                }
+                setIsSunPlaying((playing) => !playing)
+              }}
+              onScrub={(nextIndex) => {
+                const nextSample = daylightSamples[Math.round(nextIndex)]
+                setIsSunPlaying(false)
+                setSunSampleIndex(nextIndex)
+                setSelectedSunTime(nextSample?.time ?? null)
+              }}
+              onSelectSample={(sample, index) => {
+                setIsSunPlaying(false)
+                setSunSampleIndex(index)
+                setSelectedSunTime(sample.time)
+              }}
+            />
+          ) : null}
+          </div>,
+          hudDashboardRoot,
         ) : null}
       </div>
     </div>

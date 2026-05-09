@@ -96,11 +96,13 @@ textarea {
 .viewer-shell {
   position: fixed;
   inset: 0;
+  z-index: 0;
 }
 
 .viewer-stage {
   position: absolute;
   inset: 0;
+  z-index: 0;
 }
 
 .viewer-stage canvas {
@@ -110,6 +112,7 @@ textarea {
 .viewer-overlay {
   position: absolute;
   inset: 0;
+  z-index: 4;
   pointer-events: none;
 }
 
@@ -122,12 +125,14 @@ textarea {
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
+  z-index: 5;
   pointer-events: none;
 }
 
 .viewer-status,
 .viewer-actions,
 .viewer-hint,
+.viewer-dashboard,
 .viewer-error,
 .sun-sim-panel,
 .viewer-room-card {
@@ -184,6 +189,7 @@ textarea {
 .viewer-hint {
   position: absolute;
   left: 50%;
+  z-index: 4;
   transform: translateX(-50%);
   max-width: min(44rem, calc(100vw - 2rem));
   width: calc(100vw - 2rem);
@@ -197,6 +203,16 @@ textarea {
   bottom: 1rem;
 }
 
+.viewer-dashboard {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+  align-items: end;
+  gap: 1rem;
+  pointer-events: none;
+}
+
 .viewer-room-card,
 .viewer-error {
   background: var(--panel-strong);
@@ -208,7 +224,8 @@ textarea {
 }
 
 .viewer-room-card {
-  width: min(34rem, 100%);
+  width: 100%;
+  min-width: 0;
 }
 
 .viewer-error {
@@ -281,11 +298,10 @@ textarea {
 }
 
 .sun-sim-panel {
-  position: absolute;
-  right: 1rem;
-  bottom: 1rem;
-  z-index: 12;
-  width: min(28rem, calc(100vw - 2rem));
+  position: relative;
+  z-index: 5;
+  width: 100%;
+  min-width: 0;
   display: grid;
   gap: 0.6rem;
   padding: 0.9rem;
@@ -346,13 +362,15 @@ textarea {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  z-index: 6;
+  z-index: 30;
+  isolation: isolate;
 }
 
 .hud-topbar {
   position: absolute;
   top: 4.9rem;
   left: 1rem;
+  z-index: 33;
   display: flex;
   align-items: center;
   gap: 0.75rem;
@@ -374,6 +392,7 @@ textarea {
 .hud-columns {
   position: absolute;
   inset: 8.2rem 1rem 1rem;
+  z-index: 32;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -381,6 +400,8 @@ textarea {
 }
 
 .hud-column {
+  position: relative;
+  z-index: 1;
   pointer-events: auto;
   width: min(29rem, calc(50vw - 1.5rem));
   max-height: 100%;
@@ -413,12 +434,18 @@ textarea {
 }
 
 .card {
-  background: var(--panel);
+  background: var(--panel-strong);
   border: 1px solid var(--border);
   border-radius: 18px;
   padding: 0.95rem;
   box-shadow: var(--shadow);
   backdrop-filter: blur(18px);
+}
+
+.hud-dashboard-root {
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
 }
 
 .card h3 {
@@ -517,9 +544,8 @@ img {
     width: min(100%, 40rem);
   }
 
-  .sun-sim-panel {
-    right: 0.75rem;
-    bottom: 0.75rem;
+  .viewer-dashboard {
+    grid-template-columns: 1fr;
   }
 }
 
