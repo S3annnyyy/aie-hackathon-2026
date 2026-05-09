@@ -3,20 +3,24 @@ import { type ReactNode } from 'react'
 import { type LandingChapter } from './storyChapters'
 import { usePrefersReducedMotion } from './usePrefersReducedMotion'
 
+export type ChapterCopyVariant =
+  | 'editorial-bottom-left'
+  | 'center-hero'
+  | 'right-rail'
+  | 'center-bottom'
+  | 'center-top-grid'
+
 export type ChapterSectionProps = {
   chapter: LandingChapter
   total: number
   isActive: boolean
   registerRef: (id: string, node: HTMLElement | null) => void
-  /** The per-chapter visual scene rendered behind the text card. */
+  /** Full-bleed visual rendered behind the chapter copy. */
   scene: ReactNode
-  /**
-   * Theme hint for the text card. Chapter scenes vary between light and
-   * dark backgrounds; the card swaps palettes to stay readable.
-   */
-  cardTheme?: 'light' | 'dark'
-  /** Side of the viewport the text card pins to. */
-  align?: 'left' | 'right' | 'center'
+  /** Light text on dark scenes, dark text on light scenes. */
+  copyTheme?: 'light' | 'dark'
+  /** Layout variation so chapters don't all look alike. */
+  variant?: ChapterCopyVariant
 }
 
 export function ChapterSection({
@@ -25,27 +29,157 @@ export function ChapterSection({
   isActive,
   registerRef,
   scene,
-  cardTheme = 'light',
-  align = 'left',
+  copyTheme = 'dark',
+  variant = 'editorial-bottom-left',
 }: ChapterSectionProps) {
   const reducedMotion = usePrefersReducedMotion()
 
-  const inactiveState = reducedMotion ? 'opacity-90' : 'opacity-60 translate-y-6'
+  const inactiveState = reducedMotion ? 'opacity-90' : 'opacity-55 translate-y-6'
   const activeState = 'opacity-100 translate-y-0'
 
-  const containerAlign =
-    align === 'right' ? 'md:justify-end' : align === 'center' ? 'md:justify-center' : 'md:justify-start'
+  const color = copyTheme === 'dark' ? 'text-espresso' : 'text-cream'
+  const muted = copyTheme === 'dark' ? 'text-muted' : 'text-cream/85'
+  const soft = copyTheme === 'dark' ? 'text-espresso/85' : 'text-cream/90'
+  const dotColor = 'bg-terracotta'
+  const pipe = copyTheme === 'dark' ? 'text-subtle' : 'text-cream/45'
+  // A subtle text-shadow on light scenes, bolder on dark, so copy reads
+  // without a background panel.
+  const shadow = copyTheme === 'dark' ? 'drop-shadow-sm' : '[text-shadow:0_2px_24px_rgba(0,0,0,0.55)]'
 
-  const cardBase =
-    cardTheme === 'dark'
-      ? 'border-cream/15 bg-espresso/75 text-cream backdrop-blur-xl'
-      : 'border-line bg-paper/95 text-espresso backdrop-blur-xl'
-  const chipTone =
-    cardTheme === 'dark'
-      ? 'border-cream/15 bg-cream/5 text-cream'
-      : 'border-line bg-warm/70 text-espresso'
-  const mutedTone = cardTheme === 'dark' ? 'text-cream/80' : 'text-muted'
-  const pointTone = cardTheme === 'dark' ? 'text-cream/85' : 'text-espresso/85'
+  const kicker = (
+    <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-terracotta">
+      {chapter.kicker} · {chapter.chapter} / {String(total).padStart(2, '0')}
+    </p>
+  )
+
+  const title = (
+    <h2
+      className={[
+        'font-[family-name:var(--font-display)] font-semibold leading-[1.02] tracking-tight',
+        color,
+        shadow,
+      ].join(' ')}
+    >
+      {chapter.title}
+    </h2>
+  )
+
+  const summary = (
+    <p className={['max-w-2xl leading-relaxed', muted, shadow].join(' ')}>
+      {chapter.summary}
+    </p>
+  )
+
+  const points = (
+    <ul className={['space-y-2.5 text-sm leading-relaxed md:text-base', soft].join(' ')}>
+      {chapter.points.map((point) => (
+        <li key={point} className="flex gap-3">
+          <span aria-hidden className={`mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full ${dotColor}`} />
+          <span className={shadow}>{point}</span>
+        </li>
+      ))}
+    </ul>
+  )
+
+  // Chips become a light inline row (separators instead of pills) — better fit
+  // for free-floating copy than the old bordered chip pills.
+  const chips = (
+    <p className={['flex flex-wrap items-center gap-x-3 gap-y-2 text-xs font-semibold uppercase tracking-[0.22em]', color, shadow].join(' ')}>
+      {chapter.chips.map((chip, i) => (
+        <span key={chip} className="flex items-center gap-3">
+          {i > 0 ? (
+            <span aria-hidden className={pipe}>
+              ·
+            </span>
+          ) : null}
+          <span>{chip}</span>
+        </span>
+      ))}
+    </p>
+  )
+
+  let body: ReactNode
+  switch (variant) {
+    case 'center-hero':
+      body = (
+        <div className="mx-auto flex w-full max-w-5xl flex-col items-center gap-5 px-6 pt-20 text-center md:px-12 md:pt-28">
+          {kicker}
+          <div className="[&_h2]:text-5xl md:[&_h2]:text-[5.5rem]">{title}</div>
+          <div className="mx-auto max-w-2xl">{summary}</div>
+          <div className="mt-2">{chips}</div>
+        </div>
+      )
+      break
+
+    case 'right-rail':
+      body = (
+        <div className="flex h-screen items-center px-6 md:px-16">
+          <div className="ml-auto flex w-full max-w-xl flex-col items-end gap-5 text-right">
+            {kicker}
+            <div className="[&_h2]:text-4xl md:[&_h2]:text-[3.25rem]">{title}</div>
+            {summary}
+            <div className="w-full max-w-md text-left">{points}</div>
+            {chips}
+          </div>
+        </div>
+      )
+      break
+
+    case 'center-bottom':
+      body = (
+        <div className="flex h-screen items-end justify-center px-6 pb-20 md:px-12 md:pb-24">
+          <div className="flex w-full max-w-4xl flex-col items-center gap-5 text-center">
+            {kicker}
+            <div className="[&_h2]:text-4xl md:[&_h2]:text-[4rem]">{title}</div>
+            {summary}
+            <ul className={['mt-2 grid grid-cols-1 gap-3 text-sm leading-relaxed md:grid-cols-3 md:gap-6', soft].join(' ')}>
+              {chapter.points.map((point) => (
+                <li key={point} className="flex gap-3">
+                  <span aria-hidden className={`mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full ${dotColor}`} />
+                  <span className={shadow}>{point}</span>
+                </li>
+              ))}
+            </ul>
+            {chips}
+          </div>
+        </div>
+      )
+      break
+
+    case 'center-top-grid':
+      body = (
+        <div className="flex h-screen flex-col gap-8 px-6 pt-20 md:px-12 md:pt-28">
+          <div className="mx-auto flex max-w-5xl flex-col items-center gap-4 text-center">
+            {kicker}
+            <div className="[&_h2]:text-4xl md:[&_h2]:text-[4rem]">{title}</div>
+            {summary}
+          </div>
+          <div className="mx-auto mt-auto grid w-full max-w-5xl grid-cols-1 gap-4 pb-16 md:grid-cols-3 md:gap-8 md:pb-20">
+            {chapter.points.map((point) => (
+              <div key={point} className={`flex items-start gap-3 ${soft}`}>
+                <span aria-hidden className={`mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full ${dotColor}`} />
+                <span className={shadow}>{point}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )
+      break
+
+    case 'editorial-bottom-left':
+    default:
+      body = (
+        <div className="flex h-screen items-end px-6 pb-16 md:px-12 md:pb-24">
+          <div className="flex w-full max-w-2xl flex-col gap-5">
+            {kicker}
+            <div className="[&_h2]:text-4xl md:[&_h2]:text-[4rem]">{title}</div>
+            {summary}
+            {points}
+            {chips}
+          </div>
+        </div>
+      )
+  }
 
   return (
     <section
@@ -58,67 +192,11 @@ export function ChapterSection({
 
       <div
         className={[
-          'relative z-10 flex min-h-screen items-center px-6 py-20 md:px-12 lg:px-24',
-          containerAlign,
+          'relative z-10 transition-all duration-500',
+          isActive ? activeState : inactiveState,
         ].join(' ')}
       >
-        <article
-          className={[
-            'max-w-xl rounded-3xl border p-6 shadow-xl transition-all duration-500 md:p-8',
-            cardBase,
-            isActive ? activeState : inactiveState,
-          ].join(' ')}
-        >
-          <header className="flex items-baseline justify-between gap-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-terracotta">
-              {chapter.kicker}
-            </p>
-            <span
-              className={[
-                'rounded-full border px-2.5 py-0.5 text-[11px]',
-                cardTheme === 'dark'
-                  ? 'border-cream/15 text-cream/80'
-                  : 'border-line text-muted',
-              ].join(' ')}
-            >
-              {chapter.chapter} / {String(total).padStart(2, '0')}
-            </span>
-          </header>
-
-          <h2 className="mt-4 font-[family-name:var(--font-display)] text-3xl font-semibold leading-[1.1] tracking-tight md:text-[2.6rem]">
-            {chapter.title}
-          </h2>
-
-          <p className={['mt-4 text-sm leading-relaxed md:text-base', mutedTone].join(' ')}>
-            {chapter.summary}
-          </p>
-
-          <ul className={['mt-6 space-y-2.5 text-sm leading-relaxed', pointTone].join(' ')}>
-            {chapter.points.map((point) => (
-              <li key={point} className="flex gap-3">
-                <span
-                  aria-hidden
-                  className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-terracotta"
-                />
-                <span>{point}</span>
-              </li>
-            ))}
-          </ul>
-
-          <div className="mt-6 flex flex-wrap gap-2">
-            {chapter.chips.map((chip) => (
-              <span
-                key={chip}
-                className={[
-                  'rounded-full border px-3 py-1 text-xs font-medium',
-                  chipTone,
-                ].join(' ')}
-              >
-                {chip}
-              </span>
-            ))}
-          </div>
-        </article>
+        {body}
       </div>
     </section>
   )

@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
-import { ListingCard } from '../features/explore/ListingCard'
 import { Map3DView } from '../features/explore/Map3DView'
 import { StackPicker } from '../features/explore/StackPicker'
 import { formatSgd, SAMPLE_LISTING } from '../lib/sampleListing'
@@ -21,6 +20,46 @@ export default function ExplorePage() {
     setStage('choices')
   }
 
+  if (stage === 'await-upload') {
+    return (
+      <div className="mx-auto max-w-[1100px] px-4 py-10 md:px-8 md:py-14">
+        <UploadGate onFile={handleFile} />
+      </div>
+    )
+  }
+
+  return (
+    <UnitBackdrop
+      stackLabel={stackLabel}
+      facing={facing}
+      stage={stage}
+      uploadedName={uploadedName}
+      onShowUnitView={() => setStage('unit-view')}
+      onStackChange={setStackLabel}
+      onFacingChange={setFacing}
+    />
+  )
+}
+
+type UnitBackdropProps = {
+  stackLabel: string
+  facing: string
+  stage: Exclude<Stage, 'await-upload'>
+  uploadedName: string | null
+  onShowUnitView: () => void
+  onStackChange: (label: string) => void
+  onFacingChange: (facing: string) => void
+}
+
+function UnitBackdrop({
+  stackLabel,
+  facing,
+  stage,
+  uploadedName,
+  onShowUnitView,
+  onStackChange,
+  onFacingChange,
+}: UnitBackdropProps) {
   const listing = SAMPLE_LISTING
   const summaryLine = useMemo(
     () =>
@@ -31,69 +70,95 @@ export default function ExplorePage() {
   )
 
   return (
-    <div className="mx-auto max-w-[1100px] px-4 py-10 md:px-8 md:py-14">
-      {stage === 'await-upload' ? (
-        <UploadGate onFile={handleFile} />
-      ) : (
-        <>
-          <header className="mb-6 md:mb-10">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-terracotta">
-              Sample unit
-            </p>
-            <h1 className="mt-2 font-[family-name:var(--font-display)] text-3xl font-semibold leading-tight tracking-tight md:text-5xl">
-              {listing.address}
-            </h1>
-            <p className="mt-2 text-sm text-muted md:text-base">{summaryLine}</p>
-            {uploadedName ? (
-              <p className="mt-1 text-xs text-subtle">
-                Using sample data · you uploaded <em>{uploadedName}</em>
-              </p>
-            ) : null}
-          </header>
+    <div className="relative h-[calc(100vh-5rem)] w-full overflow-hidden">
+      {/* Full-bleed 3D Maps backdrop. */}
+      <div className="absolute inset-0">
+        <Map3DView
+          lat={listing.coordinates.lat}
+          lng={listing.coordinates.lng}
+          stackLabel={stackLabel}
+          facing={facing}
+        />
+        {/* Readability scrims on top + bottom so overlay copy stays legible. */}
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-espresso/40 via-transparent to-espresso/50" />
+      </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <ActionCard
-              title="Unit view"
-              description="See this block on Google 3D Maps from the stack and facing of your unit."
-              primary={stage !== 'unit-view'}
-              cta={stage === 'unit-view' ? 'Viewing' : 'Show unit view →'}
-              onClick={() => setStage('unit-view')}
-            />
-            <ActionCard
-              as="link"
-              to="/interior"
-              title="View interior"
-              description="Open the full-page 3D model of the unit with a chat overlay to design it."
-              primary
-              cta="Open interior →"
-            />
-          </div>
+      {/* Top bar — listing summary pill. */}
+      <div className="pointer-events-none absolute inset-x-0 top-4 z-10 flex justify-center px-4">
+        <div className="pointer-events-auto flex items-center gap-4 rounded-full border border-cream/20 bg-espresso/65 px-4 py-2 text-cream shadow-lg shadow-black/30 backdrop-blur-xl">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.26em] text-terracotta">
+            Sample unit
+          </span>
+          <span className="hidden text-xs text-cream/75 md:inline">·</span>
+          <span className="text-sm font-semibold">{listing.address}</span>
+          <span className="hidden text-xs text-cream/70 md:inline">· {summaryLine}</span>
+        </div>
+      </div>
 
-          {stage === 'unit-view' ? (
-            <section className="mt-10 grid gap-6 lg:grid-cols-[360px_1fr]">
-              <div className="space-y-4">
-                <ListingCard listing={listing} />
-                <StackPicker
-                  listing={listing}
-                  stackLabel={stackLabel}
-                  facing={facing}
-                  onStackChange={setStackLabel}
-                  onFacingChange={setFacing}
-                />
-              </div>
-              <div>
-                <Map3DView
-                  lat={listing.coordinates.lat}
-                  lng={listing.coordinates.lng}
-                  stackLabel={stackLabel}
-                  facing={facing}
-                />
-              </div>
-            </section>
-          ) : null}
-        </>
-      )}
+      {/* Right rail — compact action pills. */}
+      <div className="pointer-events-auto absolute right-4 top-20 z-10 flex flex-col gap-2">
+        <PillButton
+          active={stage === 'unit-view'}
+          onClick={onShowUnitView}
+          primary={stage !== 'unit-view'}
+        >
+          {stage === 'unit-view' ? 'Unit view · active' : 'Unit view'}
+        </PillButton>
+        <Link
+          to="/interior"
+          className="inline-flex items-center justify-center rounded-full bg-terracotta px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-black/30 transition hover:bg-terracotta-dark"
+        >
+          View interior →
+        </Link>
+      </div>
+
+      {/* Bottom-left — stack + facing picker appears in unit-view stage. */}
+      {stage === 'unit-view' ? (
+        <div className="pointer-events-auto absolute bottom-4 left-4 z-10 max-w-sm">
+          <StackPicker
+            listing={listing}
+            stackLabel={stackLabel}
+            facing={facing}
+            onStackChange={onStackChange}
+            onFacingChange={onFacingChange}
+          />
+        </div>
+      ) : null}
+
+      {/* Bottom-right — context hint. */}
+      <div className="pointer-events-none absolute bottom-6 right-4 z-10 max-w-xs text-right text-[11px] text-cream/70">
+        {stage === 'unit-view'
+          ? 'Picker drives the stack + facing. Google 3D Maps reframes.'
+          : uploadedName
+            ? `Using sample data · you uploaded "${uploadedName}"`
+            : 'Click Unit view to align the camera to the picked stack + facing.'}
+      </div>
     </div>
+  )
+}
+
+type PillButtonProps = {
+  active?: boolean
+  primary?: boolean
+  onClick: () => void
+  children: React.ReactNode
+}
+
+function PillButton({ active, primary, onClick, children }: PillButtonProps) {
+  const palette = active
+    ? 'border border-cream/30 bg-espresso/70 text-cream'
+    : primary
+      ? 'bg-cream text-espresso shadow-lg shadow-black/20 hover:bg-warm'
+      : 'border border-cream/30 bg-espresso/50 text-cream hover:bg-espresso/70'
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-semibold backdrop-blur-xl transition ${palette}`}
+    >
+      {children}
+    </button>
   )
 }
 
@@ -151,74 +216,5 @@ function UploadGate({ onFile }: UploadGateProps) {
         />
       </label>
     </div>
-  )
-}
-
-type ActionCardProps =
-  | {
-      as?: 'button'
-      title: string
-      description: string
-      cta: string
-      primary?: boolean
-      onClick: () => void
-      to?: never
-    }
-  | {
-      as: 'link'
-      title: string
-      description: string
-      cta: string
-      primary?: boolean
-      to: string
-      onClick?: never
-    }
-
-function ActionCard(props: ActionCardProps) {
-  const classes = [
-    'group flex flex-col justify-between gap-6 rounded-3xl border p-6 text-left transition md:p-8',
-    props.primary
-      ? 'border-terracotta bg-terracotta text-white hover:bg-terracotta-dark'
-      : 'border-line bg-paper text-espresso hover:border-terracotta/60',
-  ].join(' ')
-
-  const body = (
-    <>
-      <div>
-        <h2 className="font-[family-name:var(--font-display)] text-2xl font-semibold tracking-tight">
-          {props.title}
-        </h2>
-        <p
-          className={[
-            'mt-2 text-sm leading-relaxed',
-            props.primary ? 'text-white/80' : 'text-muted',
-          ].join(' ')}
-        >
-          {props.description}
-        </p>
-      </div>
-      <span
-        className={[
-          'inline-flex w-fit items-center gap-1 text-sm font-semibold',
-          props.primary ? 'text-white' : 'text-terracotta',
-        ].join(' ')}
-      >
-        {props.cta}
-      </span>
-    </>
-  )
-
-  if (props.as === 'link') {
-    return (
-      <Link to={props.to} className={classes}>
-        {body}
-      </Link>
-    )
-  }
-
-  return (
-    <button type="button" onClick={props.onClick} className={classes}>
-      {body}
-    </button>
   )
 }

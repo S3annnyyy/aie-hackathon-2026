@@ -129,7 +129,7 @@ export function Map3DView({ lat, lng, stackLabel, facing }: Map3DViewProps) {
   }
 
   return (
-    <div className="relative h-full min-h-[420px] w-full overflow-hidden rounded-3xl border border-line bg-warm">
+    <div className="relative h-full w-full overflow-hidden bg-warm">
       <div ref={hostRef} className="h-full w-full" aria-label="Google 3D Maps view of the block" />
       {!ready ? (
         <div className="absolute inset-0 flex items-center justify-center text-xs text-muted">
@@ -148,7 +148,7 @@ type MapFallbackProps = {
 
 function MapFallback({ reason, lat, lng }: MapFallbackProps) {
   return (
-    <div className="flex h-full min-h-[420px] w-full flex-col items-center justify-center gap-2 rounded-3xl border border-line bg-warm p-6 text-center">
+    <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-warm p-6 text-center">
       <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-terracotta">
         3D map unavailable
       </p>

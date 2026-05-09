@@ -52,29 +52,27 @@ export function StackPicker({
   )
 
   return (
-    <div className="rounded-3xl border border-line bg-paper p-5 shadow-sm md:p-6">
+    <div className="rounded-3xl border border-cream/20 bg-espresso/70 p-4 text-cream shadow-2xl shadow-black/30 backdrop-blur-xl md:p-5">
       <header className="flex items-center justify-between gap-3">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-terracotta">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.26em] text-terracotta">
             Stand at the window
           </p>
-          <h3 className="mt-1 text-base font-semibold text-espresso">
-            Pick a stack and facing
-          </h3>
+          <h3 className="mt-1 text-sm font-semibold">Pick a stack and facing</h3>
         </div>
-        <span className="rounded-full border border-line bg-warm px-3 py-1 text-[11px] font-semibold text-espresso">
+        <span className="rounded-full border border-cream/25 bg-espresso/60 px-2.5 py-0.5 text-[11px] font-semibold text-cream">
           {stackLabel}
         </span>
       </header>
 
-      <fieldset className="mt-5">
-        <legend className="text-[11px] font-semibold uppercase tracking-[0.22em] text-subtle">
+      <fieldset className="mt-4">
+        <legend className="text-[10px] font-semibold uppercase tracking-[0.24em] text-cream/60">
           Floor stack
         </legend>
         <div
           role="radiogroup"
           aria-label="Floor stack"
-          className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4"
+          className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5"
         >
           {listing.floorStack.map((band) => {
             const isActive = band.label === stackLabel
@@ -88,35 +86,29 @@ export function StackPicker({
                 onKeyDown={onStackKey}
                 onClick={() => onStackChange(band.label)}
                 className={[
-                  'rounded-2xl border px-3 py-2 text-left transition',
+                  'rounded-xl border px-2.5 py-1.5 text-left transition',
                   isActive
-                    ? 'border-terracotta bg-terracotta/10 text-espresso'
-                    : 'border-line bg-paper text-muted hover:border-terracotta/50 hover:text-espresso',
+                    ? 'border-terracotta bg-terracotta/15 text-cream'
+                    : 'border-cream/20 bg-cream/5 text-cream/80 hover:border-terracotta/60 hover:text-cream',
                 ].join(' ')}
               >
-                <span className="block text-sm font-semibold text-espresso">{band.label}</span>
+                <span className="block text-xs font-semibold">{band.label}</span>
                 {band.recentSale ? (
-                  <span className="mt-0.5 block text-[11px] text-subtle">
-                    {band.recentSale.date} · {formatSgd(band.recentSale.priceSgd)}
+                  <span className="mt-0.5 block text-[10px] text-cream/60">
+                    {band.recentSale.date}
                   </span>
-                ) : (
-                  <span className="mt-0.5 block text-[11px] text-subtle">No recent sale</span>
-                )}
+                ) : null}
               </button>
             )
           })}
         </div>
       </fieldset>
 
-      <fieldset className="mt-5">
-        <legend className="text-[11px] font-semibold uppercase tracking-[0.22em] text-subtle">
+      <fieldset className="mt-4">
+        <legend className="text-[10px] font-semibold uppercase tracking-[0.24em] text-cream/60">
           Window facing
         </legend>
-        <div
-          role="radiogroup"
-          aria-label="Window facing"
-          className="mt-2 flex flex-wrap gap-2"
-        >
+        <div role="radiogroup" aria-label="Window facing" className="mt-2 flex flex-wrap gap-1.5">
           {listing.facingCandidates.map((candidate) => {
             const isActive = candidate === facing
             return (
@@ -129,10 +121,10 @@ export function StackPicker({
                 onKeyDown={onFacingKey}
                 onClick={() => onFacingChange(candidate)}
                 className={[
-                  'rounded-full border px-3 py-1.5 text-xs font-medium transition',
+                  'rounded-full border px-2.5 py-1 text-[11px] font-medium transition',
                   isActive
                     ? 'border-terracotta bg-terracotta text-white'
-                    : 'border-line bg-paper text-muted hover:border-terracotta/60 hover:text-espresso',
+                    : 'border-cream/20 bg-cream/5 text-cream/80 hover:border-terracotta/60 hover:text-cream',
                 ].join(' ')}
               >
                 {candidate}
@@ -143,11 +135,10 @@ export function StackPicker({
       </fieldset>
 
       {activeBand?.recentSale ? (
-        <p className="mt-5 rounded-2xl border border-line bg-warm px-4 py-3 text-xs leading-relaxed text-espresso">
-          Last transacted at stack {activeBand.label} —{' '}
-          <strong>{formatSgd(activeBand.recentSale.priceSgd)}</strong> (
-          {activeBand.recentSale.date}, S$ {activeBand.recentSale.psfSgd.toLocaleString('en-SG')}{' '}
-          psf).
+        <p className="mt-4 rounded-xl border border-cream/15 bg-cream/5 px-3 py-2 text-[11px] leading-relaxed text-cream/85">
+          Last transacted — <strong>{formatSgd(activeBand.recentSale.priceSgd)}</strong> ·{' '}
+          {activeBand.recentSale.date} · S${' '}
+          {activeBand.recentSale.psfSgd.toLocaleString('en-SG')} psf
         </p>
       ) : null}
     </div>

@@ -2,7 +2,7 @@ import { useCallback, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
 import { ChapterProgress } from '../features/landing/ChapterProgress'
-import { ChapterSection } from '../features/landing/ChapterSection'
+import { ChapterSection, type ChapterCopyVariant } from '../features/landing/ChapterSection'
 import { HeroCanvas } from '../features/landing/HeroCanvas'
 import { HeroOverlay } from '../features/landing/HeroOverlay'
 import { BeforeAfterScene } from '../features/landing/scenes/BeforeAfterScene'
@@ -17,21 +17,22 @@ import { SAMPLE_LISTING } from '../lib/sampleListing'
 
 type ChapterRendering = {
   scene: ReactNode
-  cardTheme: 'light' | 'dark'
-  align: 'left' | 'right' | 'center'
+  copyTheme: 'light' | 'dark'
+  variant: ChapterCopyVariant
 }
 
 /**
- * Each chapter gets its own dedicated visual so the landing reads as a
- * story, not a brochure stack with the same hero in the corner. The card
- * theme flips between light and dark to stay legible on each scene.
+ * Each chapter gets its own visual AND its own copy layout. The variant
+ * system keeps the story from looking like five identical slides while the
+ * copy theme flips between dark ink (on cream scenes) and cream text (on
+ * dark scenes) for readability without a panel.
  */
 const CHAPTER_RENDERING: Record<string, ChapterRendering> = {
-  problem: { scene: <PinterestWall />, cardTheme: 'light', align: 'left' },
-  solution: { scene: <ThreeViewsScene />, cardTheme: 'light', align: 'right' },
-  explore: { scene: <StackScene />, cardTheme: 'dark', align: 'left' },
-  design: { scene: <InteriorScene />, cardTheme: 'dark', align: 'right' },
-  validate: { scene: <BeforeAfterScene />, cardTheme: 'dark', align: 'center' },
+  problem: { scene: <PinterestWall />, copyTheme: 'dark', variant: 'editorial-bottom-left' },
+  solution: { scene: <ThreeViewsScene />, copyTheme: 'dark', variant: 'center-top-grid' },
+  explore: { scene: <StackScene />, copyTheme: 'light', variant: 'right-rail' },
+  design: { scene: <InteriorScene />, copyTheme: 'light', variant: 'center-bottom' },
+  validate: { scene: <BeforeAfterScene />, copyTheme: 'light', variant: 'center-hero' },
 }
 
 export default function LandingPage() {
@@ -63,8 +64,8 @@ export default function LandingPage() {
       {LANDING_CHAPTERS.map((chapter) => {
         const rendering = CHAPTER_RENDERING[chapter.id] ?? {
           scene: null,
-          cardTheme: 'light' as const,
-          align: 'left' as const,
+          copyTheme: 'dark' as const,
+          variant: 'editorial-bottom-left' as const,
         }
         return (
           <ChapterSection
@@ -74,8 +75,8 @@ export default function LandingPage() {
             isActive={chapter.id === activeId}
             registerRef={registerRef}
             scene={rendering.scene}
-            cardTheme={rendering.cardTheme}
-            align={rendering.align}
+            copyTheme={rendering.copyTheme}
+            variant={rendering.variant}
           />
         )
       })}
