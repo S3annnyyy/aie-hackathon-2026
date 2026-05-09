@@ -4,16 +4,32 @@ import { Link } from 'react-router-dom'
 import { Map3DView } from '../features/explore/Map3DView'
 import { StackPicker } from '../features/explore/StackPicker'
 import { formatSgd, SAMPLE_LISTING } from '../lib/sampleListing'
+import { usePersistentState } from '../lib/usePersistentState'
 
 type Stage = 'await-upload' | 'choices' | 'unit-view'
 
+/**
+ * Nudge applied to the unit-view camera so it hovers above the block's
+ * courtyard playground (to the east-south-east of 90A Telok Blangah) rather
+ * than dead-centre on the roof slab. ~35m on heading 115° lands inside the
+ * shared yard between blocks 90A/90B from visual inspection of the tiles.
+ */
+const PLAYGROUND_CAMERA_BIAS = { headingDeg: 115, distanceMeters: 35 }
+
 export default function ExplorePage() {
-  const [stage, setStage] = useState<Stage>('await-upload')
-  const [uploadedName, setUploadedName] = useState<string | null>(null)
-  const [stackLabel, setStackLabel] = useState<string>(
-    SAMPLE_LISTING.floorStack[2]?.label ?? SAMPLE_LISTING.floorStack[0]!.label,
+  const [stage, setStage] = usePersistentState<Stage>('stackview.explore.stage', 'await-upload')
+  const [uploadedName, setUploadedName] = usePersistentState<string | null>(
+    'stackview.explore.uploadedName',
+    null,
   )
-  const [facing, setFacing] = useState<string>(SAMPLE_LISTING.facingCandidates[2] ?? 'North')
+  const [stackLabel, setStackLabel] = usePersistentState<string>(
+    'stackview.explore.stack',
+    pickMiddleStack(SAMPLE_LISTING.floorStack.map((b) => b.label)),
+  )
+  const [facing, setFacing] = usePersistentState<string>(
+    'stackview.explore.facing',
+    SAMPLE_LISTING.facingCandidates[2] ?? 'North',
+  )
 
   const handleFile = (file: File) => {
     setUploadedName(file.name)
@@ -35,10 +51,16 @@ export default function ExplorePage() {
       stage={stage}
       uploadedName={uploadedName}
       onShowUnitView={() => setStage('unit-view')}
+      onBackToBirdsEye={() => setStage('choices')}
       onStackChange={setStackLabel}
       onFacingChange={setFacing}
     />
   )
+}
+
+function pickMiddleStack(labels: readonly string[]): string {
+  if (labels.length === 0) return ''
+  return labels[Math.floor(labels.length / 2)]!
 }
 
 type UnitBackdropProps = {
@@ -47,6 +69,7 @@ type UnitBackdropProps = {
   stage: Exclude<Stage, 'await-upload'>
   uploadedName: string | null
   onShowUnitView: () => void
+  onBackToBirdsEye: () => void
   onStackChange: (label: string) => void
   onFacingChange: (facing: string) => void
 }
@@ -57,17 +80,12 @@ function UnitBackdrop({
   stage,
   uploadedName,
   onShowUnitView,
+  onBackToBirdsEye,
   onStackChange,
   onFacingChange,
 }: UnitBackdropProps) {
   const listing = SAMPLE_LISTING
-  const summaryLine = useMemo(
-    () =>
-      `${listing.bedrooms} bed · ${listing.bathrooms} bath · ${listing.areaSqft.toLocaleString()} sqft · ${formatSgd(
-        listing.priceSgd,
-      )}`,
-    [listing],
-  )
+  const pricePerSqm = useMemo(() => Math.round(listing.priceSgd / (listing.areaSqft / 10.764)), [listing])
 
   return (
     <div className="relative h-[calc(100vh-5rem)] w-full overflow-hidden">
@@ -78,43 +96,52 @@ function UnitBackdrop({
           lng={listing.coordinates.lng}
           stackLabel={stackLabel}
           facing={facing}
+          mode={stage === 'unit-view' ? 'unit' : 'birdseye'}
+          unitCameraBias={PLAYGROUND_CAMERA_BIAS}
         />
-        {/* Readability scrims on top + bottom so overlay copy stays legible. */}
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-espresso/40 via-transparent to-espresso/50" />
+        {/* Light scrims so overlays stay legible without blocking the map. */}
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-espresso/30 via-transparent to-espresso/45" />
       </div>
 
-      {/* Top bar — listing summary pill. */}
-      <div className="pointer-events-none absolute inset-x-0 top-4 z-10 flex justify-center px-4">
-        <div className="pointer-events-auto flex items-center gap-4 rounded-full border border-cream/20 bg-espresso/65 px-4 py-2 text-cream shadow-lg shadow-black/30 backdrop-blur-xl">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.26em] text-terracotta">
-            Sample unit
-          </span>
-          <span className="hidden text-xs text-cream/75 md:inline">·</span>
-          <span className="text-sm font-semibold">{listing.address}</span>
-          <span className="hidden text-xs text-cream/70 md:inline">· {summaryLine}</span>
-        </div>
+      {/* Details overlay — listing card, left side. */}
+      <div className="pointer-events-auto absolute left-4 top-4 z-10 w-[min(22rem,calc(100vw-2rem))]">
+        <ListingOverlayCard
+          listing={listing}
+          pricePerSqm={pricePerSqm}
+          uploadedName={uploadedName}
+        />
       </div>
 
-      {/* Right rail — compact action pills. */}
-      <div className="pointer-events-auto absolute right-4 top-20 z-10 flex flex-col gap-2">
-        <PillButton
-          active={stage === 'unit-view'}
-          onClick={onShowUnitView}
-          primary={stage !== 'unit-view'}
-        >
-          {stage === 'unit-view' ? 'Unit view · active' : 'Unit view'}
-        </PillButton>
+      {/* Action pills — right side. */}
+      <div className="pointer-events-auto absolute right-4 top-4 z-10 flex flex-col items-end gap-2">
+        {stage === 'unit-view' ? (
+          <button
+            type="button"
+            onClick={onBackToBirdsEye}
+            className="rounded-full border border-cream/25 bg-espresso/60 px-3 py-1.5 text-xs font-semibold text-cream backdrop-blur-xl transition hover:bg-espresso/80"
+          >
+            ← Birds-eye
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onShowUnitView}
+            className="rounded-full bg-cream px-4 py-2 text-sm font-semibold text-espresso shadow-lg shadow-black/20 transition hover:bg-warm"
+          >
+            Unit view →
+          </button>
+        )}
         <Link
           to="/interior"
-          className="inline-flex items-center justify-center rounded-full bg-terracotta px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-black/30 transition hover:bg-terracotta-dark"
+          className="rounded-full bg-terracotta px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-black/30 transition hover:bg-terracotta-dark"
         >
           View interior →
         </Link>
       </div>
 
-      {/* Bottom-left — stack + facing picker appears in unit-view stage. */}
+      {/* Stack + facing picker — only in unit-view. */}
       {stage === 'unit-view' ? (
-        <div className="pointer-events-auto absolute bottom-4 left-4 z-10 max-w-sm">
+        <div className="pointer-events-auto absolute bottom-4 left-4 z-10 w-[min(22rem,calc(100vw-2rem))]">
           <StackPicker
             listing={listing}
             stackLabel={stackLabel}
@@ -125,40 +152,66 @@ function UnitBackdrop({
         </div>
       ) : null}
 
-      {/* Bottom-right — context hint. */}
-      <div className="pointer-events-none absolute bottom-6 right-4 z-10 max-w-xs text-right text-[11px] text-cream/70">
+      {/* Bottom-right hint. */}
+      <div className="pointer-events-none absolute bottom-4 right-4 z-10 max-w-[16rem] text-right text-[11px] text-cream/70 [text-shadow:0_1px_8px_rgba(0,0,0,0.5)]">
         {stage === 'unit-view'
-          ? 'Picker drives the stack + facing. Google 3D Maps reframes.'
-          : uploadedName
-            ? `Using sample data · you uploaded "${uploadedName}"`
-            : 'Click Unit view to align the camera to the picked stack + facing.'}
+          ? 'Adjust stack and facing — the camera re-aligns to the picked window.'
+          : 'Birds-eye — click Unit view to approach the window.'}
       </div>
     </div>
   )
 }
 
-type PillButtonProps = {
-  active?: boolean
-  primary?: boolean
-  onClick: () => void
-  children: React.ReactNode
+type ListingOverlayCardProps = {
+  listing: typeof SAMPLE_LISTING
+  pricePerSqm: number
+  uploadedName: string | null
 }
 
-function PillButton({ active, primary, onClick, children }: PillButtonProps) {
-  const palette = active
-    ? 'border border-cream/30 bg-espresso/70 text-cream'
-    : primary
-      ? 'bg-cream text-espresso shadow-lg shadow-black/20 hover:bg-warm'
-      : 'border border-cream/30 bg-espresso/50 text-cream hover:bg-espresso/70'
-
+function ListingOverlayCard({ listing, pricePerSqm, uploadedName }: ListingOverlayCardProps) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-semibold backdrop-blur-xl transition ${palette}`}
-    >
-      {children}
-    </button>
+    <article className="rounded-2xl border border-cream/20 bg-espresso/75 p-4 text-cream shadow-2xl shadow-black/30 backdrop-blur-xl">
+      <header>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.26em] text-terracotta">
+          {listing.flatType} · HDB Resale
+        </p>
+        <h1 className="mt-1 font-[family-name:var(--font-display)] text-xl font-semibold leading-tight tracking-tight">
+          {listing.address}
+        </h1>
+      </header>
+
+      <dl className="mt-3 grid grid-cols-3 gap-x-3 gap-y-2 text-xs">
+        <Stat label="Price" value={formatSgd(listing.priceSgd)} />
+        <Stat label="PSF" value={`S$${listing.psfSgd.toLocaleString('en-SG')}`} />
+        <Stat label="PSM" value={`S$${pricePerSqm.toLocaleString('en-SG')}`} />
+        <Stat label="Beds" value={`${listing.bedrooms}`} />
+        <Stat label="Baths" value={`${listing.bathrooms}`} />
+        <Stat label="Area" value={`${listing.areaSqft.toLocaleString()} sqft`} />
+      </dl>
+
+      <div className="mt-3 border-t border-cream/15 pt-3 text-[11px] leading-relaxed text-cream/75">
+        <p>TOP {listing.topYear} · {listing.leaseYears}-year lease</p>
+        <p className="mt-1">
+          Nearest MRT · {listing.nearestTransit[0]?.code} {listing.nearestTransit[0]?.name} ·{' '}
+          {listing.nearestTransit[0]?.walkMinutes} min
+        </p>
+      </div>
+
+      {uploadedName ? (
+        <p className="mt-3 text-[10px] uppercase tracking-[0.22em] text-cream/50">
+          You uploaded · {uploadedName}
+        </p>
+      ) : null}
+    </article>
+  )
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-[9px] font-semibold uppercase tracking-[0.22em] text-cream/55">{label}</dt>
+      <dd className="mt-0.5 text-sm font-semibold text-cream">{value}</dd>
+    </div>
   )
 }
 
@@ -179,7 +232,7 @@ function UploadGate({ onFile }: UploadGateProps) {
       </h1>
       <p className="mt-3 text-sm text-muted md:text-base">
         A floor plan PDF, a listing screenshot, a brochure — anything. For this
-        demo we'll wire up a sample resale unit regardless of what you upload.
+        demo we'll wire up a resale unit regardless of what you upload.
       </p>
 
       <label

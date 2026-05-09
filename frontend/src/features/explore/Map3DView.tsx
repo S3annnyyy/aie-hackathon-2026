@@ -24,14 +24,35 @@ const HEADING_BY_FACING: Record<string, number> = {
   'North-West': 315,
 }
 
+export type MapCameraMode = 'birdseye' | 'unit'
+
 type Map3DViewProps = {
   lat: number
   lng: number
   stackLabel: string
   facing: string
+  /**
+   * `birdseye` — high orbit over the block, used on the initial landing
+   * stage so the viewer sees the whole precinct. `unit` — camera hovers at
+   * the picked stack midpoint and looks along the facing.
+   */
+  mode?: MapCameraMode
+  /**
+   * Optional nudge (meters, compass bearing) applied to the camera in unit
+   * mode. Used to anchor the view slightly toward a known feature — e.g.
+   * the block's courtyard playground — instead of the bare block centroid.
+   */
+  unitCameraBias?: { headingDeg: number; distanceMeters: number }
 }
 
-export function Map3DView({ lat, lng, stackLabel, facing }: Map3DViewProps) {
+export function Map3DView({
+  lat,
+  lng,
+  stackLabel,
+  facing,
+  mode = 'unit',
+  unitCameraBias,
+}: Map3DViewProps) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const elementRef = useRef<HTMLElement | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -91,6 +112,24 @@ export function Map3DView({ lat, lng, stackLabel, facing }: Map3DViewProps) {
     const element = elementRef.current as unknown as MapElement | null
     if (!element || !ready) return
 
+    if (mode === 'birdseye') {
+      // Wide, elevated orbit — show the precinct, not the window.
+      element.center = { lat, lng, altitude: 0 }
+      element.heading = 28 // slight off-axis so the block reads as a 3D mass
+      element.tilt = 55
+      element.range = 650
+      if ('cameraPosition' in element) {
+        try {
+          // Clearing any previous explicit camera position so `range` + tilt
+          // take over; alpha element sometimes latches onto a stale value.
+          element.cameraPosition = undefined
+        } catch {
+          /* ignore */
+        }
+      }
+      return
+    }
+
     const midLevel = parseStackMid(stackLabel) ?? 20
     const headingDeg = HEADING_BY_FACING[facing] ?? 0
 
@@ -100,29 +139,31 @@ export function Map3DView({ lat, lng, stackLabel, facing }: Map3DViewProps) {
     // the block footprint at this latitude.
     const unitAltitude = GROUND_CLEARANCE_METERS + midLevel * FLOOR_HEIGHT_METERS
 
-    // Place the look-at ~200m ahead of the block along the facing direction
-    // at the same altitude, so the camera parallels the ground from the
-    // window outward — matching the resident's horizon line.
+    // Optional bias — nudge the camera toward a known landmark (e.g.
+    // playground on the courtyard side) so the framing feels grounded
+    // instead of floating above the bare block centroid.
+    const biased = unitCameraBias
+      ? offsetLatLng(lat, lng, unitCameraBias.headingDeg, unitCameraBias.distanceMeters)
+      : { lat, lng }
+
+    // Look-at sits ~220m ahead of the biased position along the facing,
+    // so the camera parallels the ground from the window outward.
     const LOOK_AHEAD_METERS = 220
-    const target = offsetLatLng(lat, lng, headingDeg, LOOK_AHEAD_METERS)
+    const target = offsetLatLng(biased.lat, biased.lng, headingDeg, LOOK_AHEAD_METERS)
 
     element.center = { lat: target.lat, lng: target.lng, altitude: unitAltitude }
     element.heading = headingDeg
-    // 85° tilt = almost level, slight downward for context
     element.tilt = 85
-    // Pull the camera back ~180m from the look-at; combined with the nudge
-    // below, that places it just off the window at the correct level.
     element.range = 180
 
-    // If the element supports explicit camera position, use it for precision.
     if ('cameraPosition' in element) {
       try {
-        element.cameraPosition = { lat, lng, altitude: unitAltitude }
+        element.cameraPosition = { lat: biased.lat, lng: biased.lng, altitude: unitAltitude }
       } catch {
-        // Older/alpha builds ignore direct assignment; fall back to center/range.
+        /* alpha element may ignore — center/range fallback covers it */
       }
     }
-  }, [lat, lng, stackLabel, facing, ready])
+  }, [lat, lng, stackLabel, facing, ready, mode, unitCameraBias])
 
   if (error) {
     return <MapFallback reason={error} lat={lat} lng={lng} />
