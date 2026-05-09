@@ -46,12 +46,9 @@ export function ChapterSection({
   // without a background panel.
   const shadow = copyTheme === 'dark' ? 'drop-shadow-sm' : '[text-shadow:0_2px_24px_rgba(0,0,0,0.55)]'
 
-  const kicker = (
-    <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-terracotta">
-      {chapter.kicker} · {chapter.chapter} / {String(total).padStart(2, '0')}
-    </p>
-  )
-
+  // `total` is still part of the API but the kicker/chapter-count line is
+  // intentionally omitted from the rendered copy per product direction.
+  void total
   const title = (
     <h2
       className={[
@@ -103,7 +100,6 @@ export function ChapterSection({
     case 'center-hero':
       body = (
         <div className="mx-auto flex w-full max-w-5xl flex-col items-center gap-5 px-6 pt-20 text-center md:px-12 md:pt-28">
-          {kicker}
           <div className="[&_h2]:text-5xl md:[&_h2]:text-[5.5rem]">{title}</div>
           <div className="mx-auto max-w-2xl">{summary}</div>
           <div className="mt-2">{chips}</div>
@@ -115,8 +111,7 @@ export function ChapterSection({
       body = (
         <div className="flex h-screen items-center px-6 md:px-16">
           <div className="ml-auto flex w-full max-w-xl flex-col items-end gap-5 text-right">
-            {kicker}
-            <div className="[&_h2]:text-4xl md:[&_h2]:text-[3.25rem]">{title}</div>
+              <div className="[&_h2]:text-4xl md:[&_h2]:text-[3.25rem]">{title}</div>
             {summary}
             <div className="w-full max-w-md text-left">{points}</div>
             {chips}
@@ -129,8 +124,7 @@ export function ChapterSection({
       body = (
         <div className="flex h-screen items-end justify-center px-6 pb-20 md:px-12 md:pb-24">
           <div className="flex w-full max-w-4xl flex-col items-center gap-5 text-center">
-            {kicker}
-            <div className="[&_h2]:text-4xl md:[&_h2]:text-[4rem]">{title}</div>
+              <div className="[&_h2]:text-4xl md:[&_h2]:text-[4rem]">{title}</div>
             {summary}
             <ul className={['mt-2 grid grid-cols-1 gap-3 text-sm leading-relaxed md:grid-cols-3 md:gap-6', soft].join(' ')}>
               {chapter.points.map((point) => (
@@ -150,8 +144,7 @@ export function ChapterSection({
       body = (
         <div className="flex h-screen flex-col gap-8 px-6 pt-20 md:px-12 md:pt-28">
           <div className="mx-auto flex max-w-5xl flex-col items-center gap-4 text-center">
-            {kicker}
-            <div className="[&_h2]:text-4xl md:[&_h2]:text-[4rem]">{title}</div>
+              <div className="[&_h2]:text-4xl md:[&_h2]:text-[4rem]">{title}</div>
             {summary}
           </div>
           <div className="mx-auto mt-auto grid w-full max-w-5xl grid-cols-1 gap-4 pb-16 md:grid-cols-3 md:gap-8 md:pb-20">
@@ -171,8 +164,7 @@ export function ChapterSection({
       body = (
         <div className="flex h-screen items-end px-6 pb-16 md:px-12 md:pb-24">
           <div className="flex w-full max-w-2xl flex-col gap-5">
-            {kicker}
-            <div className="[&_h2]:text-4xl md:[&_h2]:text-[4rem]">{title}</div>
+              <div className="[&_h2]:text-4xl md:[&_h2]:text-[4rem]">{title}</div>
             {summary}
             {points}
             {chips}

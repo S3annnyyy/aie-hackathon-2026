@@ -9,13 +9,17 @@ export function StackScene() {
 
   return (
     <div className="absolute inset-0 overflow-hidden bg-gradient-to-b from-[#2a3040] via-[#1f2432] to-[#151821]">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_30%,rgba(184,107,75,0.22),transparent_60%)]" />
+      {/* Radial accent on the right side — balances the left-anchored block
+          silhouette and gives the copy pinned to the right a warm halo. */}
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_78%_38%,rgba(184,107,75,0.28),transparent_58%)]" />
 
-      <div className="absolute inset-0 flex items-end justify-center pb-24 md:pb-32">
+      {/* Block silhouette pushed to the left third of the viewport so the
+          right-rail chapter copy has clear space on the right. */}
+      <div className="absolute inset-0 flex items-end justify-start pb-24 pl-4 md:pb-32 md:pl-16">
         <svg
           viewBox="0 0 420 620"
-          className="h-[78vh] w-auto max-w-[88vw]"
-          preserveAspectRatio="xMidYEnd meet"
+          className="h-[78vh] w-auto max-w-[48vw]"
+          preserveAspectRatio="xMinYEnd meet"
           aria-hidden
         >
           {/* Building silhouette */}

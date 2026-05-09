@@ -1,7 +1,6 @@
-import { useCallback, type ReactNode } from 'react'
+import { useRef, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
-import { ChapterProgress } from '../features/landing/ChapterProgress'
 import { ChapterSection, type ChapterCopyVariant } from '../features/landing/ChapterSection'
 import { HeroCanvas } from '../features/landing/HeroCanvas'
 import { HeroOverlay } from '../features/landing/HeroOverlay'
@@ -36,19 +35,23 @@ const CHAPTER_RENDERING: Record<string, ChapterRendering> = {
 }
 
 export default function LandingPage() {
-  const heroProgress = useScrollProgress()
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const heroProgress = useScrollProgress(scrollRef)
   const { activeId, registerRef } = useActiveChapter(LANDING_CHAPTERS)
 
-  const onJump = useCallback((id: string) => {
-    const node = document.querySelector<HTMLElement>(`[data-chapter-id="${id}"]`)
-    if (!node) return
-    node.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }, [])
-
   return (
-    <>
+    // `snap-y snap-mandatory` on this wrapper makes every direct child with
+    // `snap-start` lock to the viewport as the user scrolls. Scroll-snap is
+    // scoped to this route only — applying it to <html> would break the
+    // editor pages where scrolling must stay free. The ref lets the hero's
+    // push-in animation read this container's scrollTop (window.scrollY
+    // stays 0 once the body no longer scrolls).
+    <div
+      ref={scrollRef}
+      className="h-screen snap-y snap-mandatory overflow-y-scroll overflow-x-hidden"
+    >
       {/* Act 1 — full-bleed hero. Plays once, then leaves the viewport. */}
-      <section className="relative h-screen w-full overflow-hidden bg-espresso">
+      <section className="relative h-screen w-full snap-start overflow-hidden bg-espresso">
         <HeroCanvas progress={heroProgress} frame="hero" background="#1a1410" fog />
         <HeroOverlay scrollFade={heroProgress} />
         <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center">
@@ -58,9 +61,8 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Act 2 — chapter story. One full-viewport scene per chapter. */}
-      <ChapterProgress chapters={LANDING_CHAPTERS} activeId={activeId} onJump={onJump} />
-
+      {/* Act 2 — chapter story. One full-viewport scene per chapter, each a
+          snap stop so the reader lands cleanly on every act. */}
       {LANDING_CHAPTERS.map((chapter) => {
         const rendering = CHAPTER_RENDERING[chapter.id] ?? {
           scene: null,
@@ -68,21 +70,22 @@ export default function LandingPage() {
           variant: 'editorial-bottom-left' as const,
         }
         return (
-          <ChapterSection
-            key={chapter.id}
-            chapter={chapter}
-            total={LANDING_CHAPTERS.length}
-            isActive={chapter.id === activeId}
-            registerRef={registerRef}
-            scene={rendering.scene}
-            copyTheme={rendering.copyTheme}
-            variant={rendering.variant}
-          />
+          <div key={chapter.id} className="h-screen w-full snap-start">
+            <ChapterSection
+              chapter={chapter}
+              total={LANDING_CHAPTERS.length}
+              isActive={chapter.id === activeId}
+              registerRef={registerRef}
+              scene={rendering.scene}
+              copyTheme={rendering.copyTheme}
+              variant={rendering.variant}
+            />
+          </div>
         )
       })}
 
-      {/* Act 3 — closing CTA. */}
-      <section className="relative bg-cream px-6 py-24 md:px-10 md:py-32">
+      {/* Act 3 — closing CTA, also a snap stop. */}
+      <section className="relative flex h-screen w-full snap-start items-center justify-center bg-cream px-6 md:px-10">
         <div className="mx-auto max-w-3xl rounded-[2.5rem] border border-line bg-paper p-10 text-center text-espresso shadow-xl shadow-black/5 md:p-14">
           <p className="text-xs font-semibold uppercase tracking-[0.32em] text-terracotta">
             Ready?
@@ -96,20 +99,20 @@ export default function LandingPage() {
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <Link
-              to="/explore"
+              to="/designer"
               className="inline-flex items-center gap-2 rounded-full bg-terracotta px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-terracotta/30 transition hover:bg-terracotta-dark"
             >
-              Explore the sample unit →
+              Open the designer →
             </Link>
             <Link
-              to="/designer"
+              to="/explore"
               className="inline-flex items-center rounded-full border border-espresso/20 px-6 py-3 text-sm font-semibold text-espresso transition hover:border-espresso/40 hover:bg-warm"
             >
-              Open the designer
+              Explore a unit
             </Link>
           </div>
         </div>
       </section>
-    </>
+    </div>
   )
 }
