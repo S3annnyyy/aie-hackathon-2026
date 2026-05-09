@@ -159,6 +159,12 @@ textarea {
   color: var(--subtext);
 }
 
+.viewer-actions {
+  margin-left: auto;
+  display: flex;
+  justify-content: flex-end;
+}
+
 .viewer-hint {
   position: absolute;
   left: 50%;
@@ -247,7 +253,7 @@ textarea {
 
 .hud-topbar {
   position: absolute;
-  top: 1rem;
+  top: 4.9rem;
   left: 1rem;
   display: flex;
   align-items: center;
@@ -269,7 +275,7 @@ textarea {
 
 .hud-columns {
   position: absolute;
-  inset: 4.7rem 1rem 1rem;
+  inset: 8.2rem 1rem 1rem;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -354,7 +360,7 @@ img {
   }
 
   .hud-columns {
-    inset: 4.7rem 0.75rem 0.75rem;
+    inset: 8.2rem 0.75rem 0.75rem;
     flex-direction: column;
     justify-content: flex-start;
   }
@@ -371,6 +377,7 @@ img {
 
   .hud-topbar {
     flex-wrap: wrap;
+    top: 5.1rem;
   }
 
   .hud-notice {

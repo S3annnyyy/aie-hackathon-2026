@@ -53,7 +53,7 @@ export default function App() {
     try {
       const uploaded = await uploadPdf(file)
       await refreshProject(uploaded.project_id)
-      setNotice(`Detected ${uploaded.layout_ids.length} layout crop(s) from pages: ${uploaded.detected_layout_page_numbers.join(', ') || 'none'}.`)
+      setNotice('Upload complete.')
     } catch (error) {
       setNotice(`Upload failed: ${String(error)}`)
     } finally {

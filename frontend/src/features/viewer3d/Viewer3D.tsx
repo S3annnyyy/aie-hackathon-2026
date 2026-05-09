@@ -1,4 +1,4 @@
-import { ContactShadows, Environment, Html, useGLTF } from '@react-three/drei'
+import { Environment, Html, useGLTF } from '@react-three/drei'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Component, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type ReactNode } from 'react'
 import * as THREE from 'three'
@@ -28,20 +28,6 @@ type Bounds = {
   depth: number
 }
 
-type WallSegment = {
-  id: string
-  start: WorldPoint
-  end: WorldPoint
-  radius: number
-}
-
-type DoorOpening = {
-  id: string
-  wall_id?: string | null
-  center: number[]
-  width_m?: number | null
-}
-
 type TransitionState = {
   roomId: string
   fromPosition: THREE.Vector3
@@ -50,6 +36,7 @@ type TransitionState = {
   toLookAt: THREE.Vector3
   startTime: number
   duration: number
+  targetMode: ViewerMode
 }
 
 type ViewerErrorBoundaryProps = {
@@ -65,8 +52,12 @@ const EYE_HEIGHT = 1.62
 const WALK_SPEED = 2.2
 const SPRINT_MULTIPLIER = 1.65
 const LOOK_SENSITIVITY = 0.0022
-const CAMERA_CLEARANCE = 0.16
+const CAMERA_CLEARANCE = 0.18
 const TRANSITION_SECONDS = 0.9
+const FLOOR_HEIGHT = -0.12
+const WALL_GREY = '#c9c7c1'
+const FLOOR_TONE = '#786d60'
+const FLOOR_TONE_DEEP = '#675b4f'
 
 class ViewerErrorBoundary extends Component<ViewerErrorBoundaryProps, ViewerErrorBoundaryState> {
   state: ViewerErrorBoundaryState = { hasError: false }
@@ -214,132 +205,6 @@ function computeBounds(schema: LayoutSchema | null, ppm: number): Bounds {
   }
 }
 
-function buildWallSegments(schema: LayoutSchema | null, ppm: number): WallSegment[] {
-  const openingsByWall = new Map<string, Array<{ center: WorldPoint; width: number }>>()
-  const orphanOpenings: Array<{ id: string; center: WorldPoint; width: number }> = []
-
-  for (const opening of (schema?.doors ?? []) as DoorOpening[]) {
-    if (!opening?.id || opening.center.length < 2) continue
-    const center = toWorldPoint(opening.center, ppm)
-    const width = Math.max(opening.width_m ?? 0.9, 0.18)
-    if (opening.wall_id) {
-      const wallId = String(opening.wall_id)
-      const list = openingsByWall.get(wallId) ?? []
-      list.push({ center, width })
-      openingsByWall.set(wallId, list)
-    } else {
-      orphanOpenings.push({ id: opening.id, center, width })
-    }
-  }
-
-  const isHorizontal = (start: WorldPoint, end: WorldPoint) => Math.abs(start.z - end.z) <= Math.abs(start.x - end.x)
-  const consumedOrphans = new Set<string>()
-
-  const subtractOpenings = (
-    wall: WallSegment,
-    wallOpenings: Array<{ center: WorldPoint; width: number }>,
-  ): WallSegment[] => {
-    const horizontal = isHorizontal(wall.start, wall.end)
-    const wallCoord = horizontal ? (wall.start.z + wall.end.z) / 2 : (wall.start.x + wall.end.x) / 2
-    const spanStart = horizontal ? Math.min(wall.start.x, wall.end.x) : Math.min(wall.start.z, wall.end.z)
-    const spanEnd = horizontal ? Math.max(wall.start.x, wall.end.x) : Math.max(wall.start.z, wall.end.z)
-    let spans: Array<[number, number]> = [[spanStart, spanEnd]]
-
-    for (const opening of wallOpenings) {
-      const openingCoord = horizontal ? opening.center.z : opening.center.x
-      const openingAxis = horizontal ? opening.center.x : opening.center.z
-      if (Math.abs(openingCoord - wallCoord) > 0.35) continue
-
-      const half = opening.width / 2
-      const gapPad = 0.08
-      const gapStart = openingAxis - half - gapPad
-      const gapEnd = openingAxis + half + gapPad
-
-      const next: Array<[number, number]> = []
-      for (const [start, end] of spans) {
-        if (gapEnd <= start || gapStart >= end) {
-          next.push([start, end])
-          continue
-        }
-        if (gapStart > start + 0.16) {
-          next.push([start, Math.min(gapStart, end)])
-        }
-        if (gapEnd < end - 0.16) {
-          next.push([Math.max(gapEnd, start), end])
-        }
-      }
-      spans = next
-    }
-
-    return spans
-      .filter(([start, end]) => end - start >= 0.18)
-      .map(([start, end], idx) =>
-        horizontal
-          ? {
-              id: `${wall.id}_segment_${idx}`,
-              start: { x: start, z: wallCoord },
-              end: { x: end, z: wallCoord },
-              radius: wall.radius,
-            }
-          : {
-              id: `${wall.id}_segment_${idx}`,
-              start: { x: wallCoord, z: start },
-              end: { x: wallCoord, z: end },
-              radius: wall.radius,
-            },
-      )
-  }
-
-  const fallbackOpeningsForWall = (wall: Wall, start: WorldPoint, end: WorldPoint) => {
-    const horizontal = isHorizontal(start, end)
-    const wallCoord = horizontal ? (start.z + end.z) / 2 : (start.x + end.x) / 2
-    const spanStart = horizontal ? Math.min(start.x, end.x) : Math.min(start.z, end.z)
-    const spanEnd = horizontal ? Math.max(start.x, end.x) : Math.max(start.z, end.z)
-
-    const candidates = orphanOpenings
-      .filter((opening) => !consumedOrphans.has(opening.id))
-      .map((opening) => {
-        const openingCoord = horizontal ? opening.center.z : opening.center.x
-        const openingAxis = horizontal ? opening.center.x : opening.center.z
-        const distanceToWall = Math.abs(openingCoord - wallCoord)
-        const outsideSpan = openingAxis < spanStart - 0.4 || openingAxis > spanEnd + 0.4
-        return {
-          opening,
-          distanceToWall,
-          outsideSpan,
-        }
-      })
-      .filter(({ distanceToWall, outsideSpan }) => distanceToWall <= 0.35 && !outsideSpan)
-      .sort((a, b) => a.distanceToWall - b.distanceToWall)
-
-    const selected = candidates.slice(0, 2)
-    selected.forEach(({ opening }) => consumedOrphans.add(opening.id))
-    return selected.map(({ opening }) => ({ center: opening.center, width: opening.width }))
-  }
-
-  return (schema?.walls ?? []).flatMap((wall: Wall) => {
-    const start = toWorldPoint(wall.start, ppm)
-    const end = toWorldPoint(wall.end, ppm)
-    if ((end.x - start.x) ** 2 + (end.z - start.z) ** 2 <= 1e-6) {
-      return []
-    }
-
-    const base: WallSegment = {
-      id: wall.id,
-      start,
-      end,
-      radius: Math.max(wall.thickness_m / 2 + CAMERA_CLEARANCE, 0.14),
-    }
-
-    const wallOpenings = [
-      ...(openingsByWall.get(wall.id) ?? []),
-      ...fallbackOpeningsForWall(wall, start, end),
-    ]
-
-    return wallOpenings.length ? subtractOpenings(base, wallOpenings) : [base]
-  })
-}
-
 function createFloorTexture() {
   if (typeof document === 'undefined') return null
 
@@ -349,49 +214,60 @@ function createFloorTexture() {
   const ctx = canvas.getContext('2d')
   if (!ctx) return null
 
-  ctx.fillStyle = '#c7b19a'
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
-
   const base = ctx.createLinearGradient(0, 0, canvas.width, canvas.height)
-  base.addColorStop(0, '#d1bca6')
-  base.addColorStop(0.5, '#bea993')
-  base.addColorStop(1, '#b29c86')
+  base.addColorStop(0, FLOOR_TONE)
+  base.addColorStop(0.45, '#6f6458')
+  base.addColorStop(1, FLOOR_TONE_DEEP)
   ctx.fillStyle = base
   ctx.fillRect(0, 0, canvas.width, canvas.height)
 
-  for (let y = 0; y < canvas.height; y += 96) {
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)'
-    ctx.lineWidth = 10
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.035)'
+  ctx.lineWidth = 1.2
+  for (let y = 0; y <= canvas.height; y += 46) {
     ctx.beginPath()
-    ctx.moveTo(0, y + 12)
-    ctx.lineTo(canvas.width, y + 12)
+    ctx.moveTo(0, y + 0.5)
+    ctx.lineTo(canvas.width, y + 0.5)
     ctx.stroke()
   }
 
-  for (let x = 0; x < canvas.width; x += 64) {
-    ctx.strokeStyle = 'rgba(94, 69, 52, 0.045)'
-    ctx.lineWidth = 1
+  ctx.strokeStyle = 'rgba(80, 67, 54, 0.05)'
+  ctx.lineWidth = 2
+  for (let x = 0; x <= canvas.width; x += 128) {
     ctx.beginPath()
-    ctx.moveTo(x, 0)
-    ctx.lineTo(x, canvas.height)
+    ctx.moveTo(x + 0.5, 0)
+    ctx.lineTo(x + 0.5, canvas.height)
     ctx.stroke()
   }
 
   const image = ctx.getImageData(0, 0, canvas.width, canvas.height)
   const { data } = image
   for (let i = 0; i < data.length; i += 4) {
-    const noise = (Math.random() - 0.5) * 9
+    const noise = (Math.random() - 0.5) * 3
     data[i] = clamp(data[i] + noise, 0, 255)
     data[i + 1] = clamp(data[i + 1] + noise * 0.8, 0, 255)
     data[i + 2] = clamp(data[i + 2] + noise * 0.6, 0, 255)
   }
   ctx.putImageData(image, 0, 0)
 
+  const vignette = ctx.createRadialGradient(
+    canvas.width * 0.5,
+    canvas.height * 0.42,
+    canvas.width * 0.12,
+    canvas.width * 0.5,
+    canvas.height * 0.5,
+    canvas.width * 0.72,
+  )
+  vignette.addColorStop(0, 'rgba(255, 255, 255, 0)')
+  vignette.addColorStop(1, 'rgba(27, 21, 15, 0.16)')
+  ctx.fillStyle = vignette
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+
   const texture = new THREE.CanvasTexture(canvas)
   texture.colorSpace = THREE.SRGBColorSpace
-  texture.wrapS = THREE.RepeatWrapping
-  texture.wrapT = THREE.RepeatWrapping
-  texture.repeat.set(2, 2)
+  texture.wrapS = THREE.ClampToEdgeWrapping
+  texture.wrapT = THREE.ClampToEdgeWrapping
+  texture.minFilter = THREE.LinearFilter
+  texture.magFilter = THREE.LinearFilter
   texture.anisotropy = 8
   texture.needsUpdate = true
   return texture
@@ -411,9 +287,9 @@ function FloorPlane({ bounds }: { bounds: Bounds }) {
   if (!texture) return null
 
   return (
-    <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[bounds.centerX, 0, bounds.centerZ]}>
+    <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[bounds.centerX, FLOOR_HEIGHT, bounds.centerZ]}>
       <planeGeometry args={[size, size]} />
-      <meshStandardMaterial map={texture} color="#c7b19a" roughness={0.96} metalness={0.02} />
+      <meshStandardMaterial map={texture} color="#77695c" roughness={1} metalness={0} />
     </mesh>
   )
 }
@@ -460,38 +336,134 @@ function roomHeading(from: THREE.Vector3, to: THREE.Vector3) {
   return { yaw, pitch }
 }
 
-function isBlocked(point: WorldPoint, walls: WallSegment[]) {
-  return walls.some((wall) => distancePointToSegmentSquared(point, wall.start, wall.end) < wall.radius * wall.radius)
+function getMeshDimensions(mesh: THREE.Mesh) {
+  const geometry = mesh.geometry as THREE.BufferGeometry | undefined
+  if (!geometry) {
+    return new THREE.Vector3(0, 0, 0)
+  }
+
+  if (!geometry.boundingBox) {
+    geometry.computeBoundingBox()
+  }
+
+  return geometry.boundingBox?.getSize(new THREE.Vector3()) ?? new THREE.Vector3(0, 0, 0)
+}
+
+function classifyInteriorSurface(mesh: THREE.Mesh) {
+  const size = getMeshDimensions(mesh)
+  const maxHorizontal = Math.max(size.x, size.z)
+  const minHorizontal = Math.min(size.x, size.z)
+
+  if (size.y <= Math.max(0.16, minHorizontal * 0.25) && maxHorizontal >= 1.2) {
+    return 'floor' as const
+  }
+
+  if (size.y >= Math.max(size.x, size.z) * 1.15 && minHorizontal <= 0.55) {
+    return 'wall' as const
+  }
+
+  return 'other' as const
+}
+
+function styleMaterialForInterior(material: THREE.Material, kind: 'floor' | 'wall' | 'other') {
+  const next = material.clone() as THREE.Material & Record<string, unknown>
+  const typed = next as THREE.Material & {
+    color?: THREE.Color
+    roughness?: number
+    metalness?: number
+    transparent?: boolean
+    opacity?: number
+    depthWrite?: boolean
+    side?: number
+    envMapIntensity?: number
+    emissive?: THREE.Color
+    emissiveIntensity?: number
+    clearcoat?: number
+    sheen?: number
+    map?: THREE.Texture | null
+    alphaMap?: THREE.Texture | null
+    transmission?: number
+  }
+
+  typed.transparent = false
+  typed.opacity = 1
+  typed.depthWrite = true
+  typed.side = THREE.DoubleSide
+
+  if (kind === 'wall' || kind === 'floor') {
+    typed.color?.set(kind === 'floor' ? FLOOR_TONE : WALL_GREY)
+    typed.roughness = kind === 'floor' ? 0.98 : 0.92
+    typed.metalness = 0
+    typed.envMapIntensity = kind === 'floor' ? 0.14 : 0.08
+    typed.emissive?.set(kind === 'floor' ? '#15110d' : '#111111')
+    typed.emissiveIntensity = 0.02
+    typed.clearcoat = 0
+    typed.sheen = 0
+    typed.transmission = 0
+  }
+
+  if (kind === 'wall') {
+    typed.color?.offsetHSL(0, -0.03, -0.02)
+  }
+
+  if (kind === 'floor') {
+    typed.color?.offsetHSL(0, -0.02, -0.03)
+  }
+
+  if ('needsUpdate' in typed) {
+    typed.needsUpdate = true
+  }
+
+  return next
+}
+
+function WallOverlay({ walls, ppm }: { walls: Wall[]; ppm: number }) {
+  if (!walls.length) return null
+
+  return (
+    <group>
+      {walls.map((wall) => {
+        const start = toWorldPoint(wall.start, ppm)
+        const end = toWorldPoint(wall.end, ppm)
+        const centerX = (start.x + end.x) / 2
+        const centerZ = (start.z + end.z) / 2
+        const length = Math.max(0.12, Math.hypot(end.x - start.x, end.z - start.z))
+        const height = Math.max(2.2, wall.height_m)
+        const thickness = Math.max(0.07, wall.thickness_m)
+        const angle = Math.atan2(end.z - start.z, end.x - start.x)
+
+        return (
+          <group key={wall.id} position={[centerX, FLOOR_HEIGHT, centerZ]} rotation={[0, -angle, 0]}>
+            <mesh castShadow receiveShadow position={[0, height / 2, 0]}>
+              <boxGeometry args={[length, height, thickness]} />
+              <meshStandardMaterial
+                color="#b9b8b3"
+                roughness={0.96}
+                metalness={0}
+                side={THREE.DoubleSide}
+                polygonOffset
+                polygonOffsetFactor={1}
+                polygonOffsetUnits={1}
+              />
+            </mesh>
+          </group>
+        )
+      })}
+    </group>
+  )
 }
 
 function resolveMovement(
   current: THREE.Vector3,
   candidate: THREE.Vector3,
-  walls: WallSegment[],
   bounds: Bounds,
 ) {
   const margin = CAMERA_CLEARANCE
-  const clamped = new THREE.Vector3(
+  return new THREE.Vector3(
     clamp(candidate.x, bounds.minX + margin, bounds.maxX - margin),
     EYE_HEIGHT,
     clamp(candidate.z, bounds.minZ + margin, bounds.maxZ - margin),
   )
-
-  if (!isBlocked({ x: clamped.x, z: clamped.z }, walls)) {
-    return clamped
-  }
-
-  const xOnly = new THREE.Vector3(clamped.x, EYE_HEIGHT, current.z)
-  if (!isBlocked({ x: xOnly.x, z: xOnly.z }, walls)) {
-    return xOnly
-  }
-
-  const zOnly = new THREE.Vector3(current.x, EYE_HEIGHT, clamped.z)
-  if (!isBlocked({ x: zOnly.x, z: zOnly.z }, walls)) {
-    return zOnly
-  }
-
-  return current.clone()
 }
 
 function AlignedGlbModel({ url, anchor }: { url: string; anchor: THREE.Vector3 }) {
@@ -504,6 +476,18 @@ function AlignedGlbModel({ url, anchor }: { url: string; anchor: THREE.Vector3 }
         const mesh = child as THREE.Mesh
         mesh.castShadow = true
         mesh.receiveShadow = true
+
+        const kind = classifyInteriorSurface(mesh)
+        if (kind !== 'other') {
+          const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+          mesh.material = materials.map((material) => styleMaterialForInterior(material, kind))
+        } else {
+          const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+          mesh.material = materials.map((material) => {
+            const next = styleMaterialForInterior(material, 'other')
+            return next
+          })
+        }
       }
     })
     scene.updateMatrixWorld(true)
@@ -612,10 +596,10 @@ type SceneRigProps = {
   transition: TransitionState | null
   overviewPosition: THREE.Vector3
   overviewLookAt: THREE.Vector3
-  walls: WallSegment[]
   bounds: Bounds
   onTransitionComplete: () => void
   onPointerLockChange: (locked: boolean) => void
+  onPoseChange: (position: THREE.Vector3, lookAt: THREE.Vector3) => void
   pointerLockTarget: MutableRefObject<HTMLCanvasElement | null>
 }
 
@@ -624,10 +608,10 @@ function SceneRig({
   transition,
   overviewPosition,
   overviewLookAt,
-  walls,
   bounds,
   onTransitionComplete,
   onPointerLockChange,
+  onPoseChange,
   pointerLockTarget,
 }: SceneRigProps) {
   const { camera, gl } = useThree()
@@ -685,8 +669,9 @@ function SceneRig({
       currentTarget.current = overviewLookAt.clone()
       camera.lookAt(overviewLookAt)
       currentYawPitch.current = roomHeading(camera.position, overviewLookAt)
+      onPoseChange(camera.position, currentTarget.current)
     }
-  }, [camera, mode, overviewLookAt, overviewPosition])
+  }, [camera, mode, onPoseChange, overviewLookAt, overviewPosition])
 
   useEffect(() => {
     if (!transition) return
@@ -705,6 +690,7 @@ function SceneRig({
       currentTarget.current.lerpVectors(transition.fromLookAt, transition.toLookAt, eased)
       camera.lookAt(currentTarget.current)
       currentYawPitch.current = roomHeading(camera.position, currentTarget.current)
+      onPoseChange(camera.position, currentTarget.current)
       if (progress >= 1 && !transitionComplete.current) {
         transitionComplete.current = true
         onTransitionComplete()
@@ -739,7 +725,7 @@ function SceneRig({
     if (movement.lengthSq() > 0) {
       movement.normalize().multiplyScalar(speed * delta)
       const candidate = camera.position.clone().add(movement)
-      const resolved = resolveMovement(camera.position, candidate, walls, bounds)
+      const resolved = resolveMovement(camera.position, candidate, bounds)
       camera.position.copy(resolved)
     }
 
@@ -750,6 +736,7 @@ function SceneRig({
     )
     currentTarget.current.copy(camera.position).add(lookDirection)
     camera.lookAt(currentTarget.current)
+    onPoseChange(camera.position, currentTarget.current)
   })
 
   return null
@@ -763,6 +750,10 @@ export function Viewer3D({ glbUrl, schema }: Props) {
   const [modelError, setModelError] = useState<string | null>(null)
   const [pointerLocked, setPointerLocked] = useState(false)
   const pointerLockTarget = useRef<HTMLCanvasElement | null>(null)
+  const currentPoseRef = useRef({
+    position: new THREE.Vector3(),
+    lookAt: new THREE.Vector3(),
+  })
 
   const ppm = schema?.scale.pixels_per_meter ?? 100
   const bounds = useMemo(() => computeBounds(schema, ppm), [schema, ppm])
@@ -779,7 +770,6 @@ export function Viewer3D({ glbUrl, schema }: Props) {
         })),
     [schema?.rooms, ppm],
   )
-  const walls = useMemo(() => buildWallSegments(schema, ppm), [schema, ppm])
   const selectedRoom = useMemo(
     () => rooms.find((entry) => entry.room.id === selectedRoomId)?.room ?? null,
     [rooms, selectedRoomId],
@@ -792,6 +782,10 @@ export function Viewer3D({ glbUrl, schema }: Props) {
     setTransition(null)
     setModelError(null)
     setPointerLocked(false)
+    currentPoseRef.current = {
+      position: overviewPosition.clone(),
+      lookAt: overviewLookAt.clone(),
+    }
     if (document.pointerLockElement) {
       document.exitPointerLock()
     }
@@ -814,6 +808,7 @@ export function Viewer3D({ glbUrl, schema }: Props) {
       toLookAt,
       startTime: performance.now() / 1000,
       duration: TRANSITION_SECONDS,
+      targetMode: 'walkthrough',
     })
     setMode('transitioning')
 
@@ -826,8 +821,18 @@ export function Viewer3D({ glbUrl, schema }: Props) {
     if (document.pointerLockElement) {
       document.exitPointerLock()
     }
-    setMode('overview')
-    setTransition(null)
+    const pose = currentPoseRef.current
+    setTransition({
+      roomId: selectedRoomId ?? 'overview',
+      fromPosition: pose.position.clone(),
+      fromLookAt: pose.lookAt.clone(),
+      toPosition: overviewPosition.clone(),
+      toLookAt: overviewLookAt.clone(),
+      startTime: performance.now() / 1000,
+      duration: 0.95,
+      targetMode: 'overview',
+    })
+    setMode('transitioning')
     setSelectedRoomId(null)
   }
 
@@ -842,15 +847,15 @@ export function Viewer3D({ glbUrl, schema }: Props) {
             camera.position.copy(overviewPosition)
             camera.lookAt(overviewLookAt)
           }}
-        >
-          <color attach="background" args={['#dde2e7']} />
-          <fog attach="fog" args={['#dde2e7', 24, 90]} />
-          <ambientLight intensity={0.78} />
-          <hemisphereLight intensity={0.92} color="#f7fbff" groundColor="#aea08e" />
+          >
+          <color attach="background" args={['#d3d5d6']} />
+          <fog attach="fog" args={['#ccd0d2', 26, 120]} />
+          <ambientLight intensity={0.32} />
+          <hemisphereLight intensity={0.42} color="#f2f0ea" groundColor="#7b7367" />
           <directionalLight
             position={[sceneAnchor.x + bounds.width * 0.45, Math.max(bounds.width, bounds.depth) * 1.8 + 12, sceneAnchor.z + bounds.depth * 0.25]}
-            intensity={1.75}
-            color="#fff3d9"
+            intensity={1.26}
+            color="#fff6e6"
             castShadow
             shadow-mapSize-width={2048}
             shadow-mapSize-height={2048}
@@ -860,30 +865,32 @@ export function Viewer3D({ glbUrl, schema }: Props) {
             shadow-camera-right={28}
             shadow-camera-top={28}
             shadow-camera-bottom={-28}
+            shadow-bias={-0.0002}
+            shadow-normalBias={0.035}
           />
-          <directionalLight position={[sceneAnchor.x - 18, 16, sceneAnchor.z - 14]} intensity={0.42} color="#c9dfff" />
-          <Environment preset="apartment" background={false} />
+          <directionalLight position={[sceneAnchor.x - 18, 16, sceneAnchor.z - 14]} intensity={0.14} color="#d7dde4" />
+          <Environment preset="city" background={false} />
           <FloorPlane bounds={bounds} />
-          <ContactShadows
-            position={[bounds.centerX, 0.02, bounds.centerZ]}
-            scale={Math.max(bounds.width, bounds.depth) + 12}
-            blur={2.8}
-            far={Math.max(bounds.width, bounds.depth) + 16}
-            opacity={0.28}
-            resolution={1024}
-          />
           <SceneRig
             mode={mode}
             transition={transition}
             overviewPosition={overviewPosition}
             overviewLookAt={overviewLookAt}
-            walls={walls}
             bounds={bounds}
             onTransitionComplete={() => {
-              setMode('walkthrough')
+              setMode(transition?.targetMode ?? 'overview')
               setTransition(null)
+              if (transition?.targetMode === 'overview') {
+                setSelectedRoomId(null)
+              }
             }}
             onPointerLockChange={setPointerLocked}
+            onPoseChange={(position, lookAt) => {
+              currentPoseRef.current = {
+                position: position.clone(),
+                lookAt: lookAt.clone(),
+              }
+            }}
             pointerLockTarget={pointerLockTarget}
           />
           <Suspense fallback={null}>
@@ -895,6 +902,7 @@ export function Viewer3D({ glbUrl, schema }: Props) {
               }}
             />
           </Suspense>
+          <WallOverlay walls={schema?.walls ?? []} ppm={ppm} />
           {rooms.map(({ room, centroid }) => (
             <RoomMarker
               key={room.id}
