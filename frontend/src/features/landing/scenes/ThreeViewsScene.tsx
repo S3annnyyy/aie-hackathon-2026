@@ -37,21 +37,21 @@ const VIEWS = [
 export function ThreeViewsScene() {
   return (
     <div className="absolute inset-0 flex items-center bg-gradient-to-b from-cream to-warm">
-      <div className="grid w-full gap-4 px-4 md:grid-cols-3 md:gap-8 md:px-16">
+      <div className="mx-auto grid w-full max-w-4xl gap-4 px-6 md:grid-cols-3 md:gap-6">
         {VIEWS.map((v, i) => (
           <figure
             key={v.label}
-            className="group relative overflow-hidden rounded-3xl border border-line bg-paper shadow-lg"
+            className="group relative overflow-hidden rounded-2xl border border-line bg-paper shadow-lg"
             style={{
               animation: `stackview-tile-pulse 9s ease-in-out ${i * 3}s infinite`,
             }}
           >
-            <div className="aspect-[4/5] w-full overflow-hidden md:aspect-[3/4]">{v.visual}</div>
-            <figcaption className="absolute inset-x-0 bottom-0 flex items-baseline justify-between gap-3 bg-gradient-to-t from-espresso/80 via-espresso/20 to-transparent px-5 py-4">
-              <span className="font-[family-name:var(--font-display)] text-xl font-semibold text-cream md:text-2xl">
+            <div className="aspect-[4/5] w-full overflow-hidden">{v.visual}</div>
+            <figcaption className="absolute inset-x-0 bottom-0 flex items-baseline justify-between gap-2 bg-gradient-to-t from-espresso/80 via-espresso/20 to-transparent px-4 py-3">
+              <span className="font-[family-name:var(--font-display)] text-base font-semibold text-cream md:text-lg">
                 {v.label}
               </span>
-              <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cream/80">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cream/80">
                 {v.subtitle}
               </span>
             </figcaption>

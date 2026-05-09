@@ -143,14 +143,22 @@ export function ChapterSection({
     case 'center-top-grid':
       body = (
         <div className="flex h-screen flex-col gap-8 px-6 pt-20 md:px-12 md:pt-28">
-          <div className="mx-auto flex max-w-5xl flex-col items-center gap-4 text-center">
-              <div className="[&_h2]:text-4xl md:[&_h2]:text-[4rem]">{title}</div>
+          <div className="mx-auto flex max-w-4xl flex-col items-center gap-4 text-center">
+            <div className="[&_h2]:text-4xl md:[&_h2]:text-[4rem]">{title}</div>
             {summary}
           </div>
-          <div className="mx-auto mt-auto grid w-full max-w-5xl grid-cols-1 gap-4 pb-16 md:grid-cols-3 md:gap-8 md:pb-20">
+          {/* Grid width + gap mirror the ThreeViewsScene tiles so each bullet
+              sits directly beneath its matching box. */}
+          <div className="mx-auto mt-auto grid w-full max-w-4xl grid-cols-1 gap-4 pb-16 md:grid-cols-3 md:gap-6 md:pb-20">
             {chapter.points.map((point) => (
-              <div key={point} className={`flex items-start gap-3 ${soft}`}>
-                <span aria-hidden className={`mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full ${dotColor}`} />
+              <div
+                key={point}
+                className={`flex items-start gap-2 px-2 text-sm md:text-[0.95rem] ${soft}`}
+              >
+                <span
+                  aria-hidden
+                  className={`mt-2 h-1.5 w-1.5 shrink-0 rounded-full ${dotColor}`}
+                />
                 <span className={shadow}>{point}</span>
               </div>
             ))}

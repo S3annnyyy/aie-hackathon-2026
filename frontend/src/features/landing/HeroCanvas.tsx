@@ -30,6 +30,8 @@ export type HeroCanvasProps = {
   background?: string | null
   /** Show fog? Only looks right on dark backgrounds. */
   fog?: boolean
+  /** Freeze the camera at its frame pose — no idle orbit, no scroll push-in. */
+  still?: boolean
 }
 
 export function HeroCanvas({
@@ -37,6 +39,7 @@ export function HeroCanvas({
   frame = 'hero',
   background = null,
   fog = false,
+  still = false,
 }: HeroCanvasProps) {
   const reducedMotion = usePrefersReducedMotion()
 
@@ -74,7 +77,11 @@ export function HeroCanvas({
         />
       </Suspense>
 
-      <CinematicCamera progress={progress} frame={frame} reducedMotion={reducedMotion} />
+      <CinematicCamera
+        progress={progress}
+        frame={frame}
+        reducedMotion={reducedMotion || still}
+      />
     </Canvas>
   )
 }
@@ -178,7 +185,10 @@ function CinematicCamera({ progress, frame, reducedMotion }: CinematicCameraProp
         : pose.height
 
     const baseOrbitSpeed = reducedMotion ? 0 : 0.07 * pose.orbitSpeed
-    const angle = elapsed * baseOrbitSpeed + pose.phase
+    // Hero sweeps right→left (viewer's POV); chapter frames keep the original
+    // direction so the panel scenes orbit toward the pose they were tuned for.
+    const directionSign = lastFrame.current === 'hero' ? -1 : 1
+    const angle = elapsed * baseOrbitSpeed * directionSign + pose.phase
 
     const desiredX = Math.sin(angle) * radius
     const desiredZ = Math.cos(angle) * radius

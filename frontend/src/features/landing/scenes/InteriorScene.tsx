@@ -8,7 +8,7 @@ import { HeroCanvas } from '../HeroCanvas'
 export function InteriorScene() {
   return (
     <div className="absolute inset-0 bg-espresso">
-      <HeroCanvas frame="interior" background="#1a1410" fog />
+      <HeroCanvas frame="interior" background="#1a1410" fog still />
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-espresso/85 via-espresso/35 to-espresso/25" />
     </div>
   )

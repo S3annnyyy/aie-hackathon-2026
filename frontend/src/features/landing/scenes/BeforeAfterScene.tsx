@@ -9,7 +9,7 @@ export function BeforeAfterScene() {
     <div className="absolute inset-0 bg-gradient-to-b from-[#0f1218] via-[#1a1410] to-[#1a1410]">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_40%,rgba(124,138,106,0.18),transparent_55%),radial-gradient(circle_at_75%_60%,rgba(184,107,75,0.22),transparent_55%)]" />
 
-      <div className="relative mx-auto flex h-full max-w-[1280px] items-center gap-6 px-4 py-16 md:gap-10 md:px-12">
+      <div className="relative mx-auto flex h-full max-w-3xl items-end justify-center gap-4 px-6 pb-24 pt-16 md:gap-8 md:pb-32">
         <Side
           label="Viewport"
           kicker="Your 3D model"
@@ -18,12 +18,12 @@ export function BeforeAfterScene() {
           <WireframeInterior />
         </Side>
 
-        <div className="relative flex h-64 flex-col items-center gap-2 self-center md:h-96">
-          <div className="h-px flex-1 w-px bg-gradient-to-b from-transparent via-terracotta/80 to-transparent" />
-          <span className="rounded-full border border-terracotta/50 bg-espresso/80 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.26em] text-terracotta">
+        <div className="relative flex h-44 flex-col items-center gap-2 self-center md:h-56">
+          <div className="w-px flex-1 bg-gradient-to-b from-transparent via-terracotta/80 to-transparent" />
+          <span className="rounded-full border border-terracotta/50 bg-espresso/80 px-2.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.24em] text-terracotta">
             GPT Image
           </span>
-          <div className="h-px flex-1 w-px bg-gradient-to-b from-transparent via-terracotta/80 to-transparent" />
+          <div className="w-px flex-1 bg-gradient-to-b from-transparent via-terracotta/80 to-transparent" />
         </div>
 
         <Side
@@ -51,9 +51,9 @@ type SideProps = {
 
 function Side({ label, kicker, gradient, accent, children }: SideProps) {
   return (
-    <figure className="relative flex-1">
+    <figure className="relative w-full max-w-[11rem] md:max-w-[13rem]">
       <div
-        className="aspect-[5/6] w-full overflow-hidden rounded-[2rem] border border-cream/10 shadow-2xl shadow-black/50 md:aspect-[4/5]"
+        className="aspect-[4/5] w-full overflow-hidden rounded-2xl border border-cream/10 shadow-xl shadow-black/50"
         style={{ background: gradient }}
       >
         {children}

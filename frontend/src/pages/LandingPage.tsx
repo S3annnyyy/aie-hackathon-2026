@@ -30,7 +30,7 @@ const CHAPTER_RENDERING: Record<string, ChapterRendering> = {
   problem: { scene: <PinterestWall />, copyTheme: 'dark', variant: 'editorial-bottom-left' },
   solution: { scene: <ThreeViewsScene />, copyTheme: 'dark', variant: 'center-top-grid' },
   explore: { scene: <StackScene />, copyTheme: 'light', variant: 'right-rail' },
-  design: { scene: <InteriorScene />, copyTheme: 'light', variant: 'center-bottom' },
+  design: { scene: <InteriorScene />, copyTheme: 'light', variant: 'center-top-grid' },
   validate: { scene: <BeforeAfterScene />, copyTheme: 'light', variant: 'center-hero' },
 }
 
