@@ -1,10 +1,15 @@
 /**
  * Browser-side OpenAI Image edit client.
  *
- * Calls the `/v1/images/edits` endpoint with `model=gpt-image-1` (the current
- * API name for the "GPT Image" / "DALL-E 4-class" model, colloquially
- * referred to as "GPT Image 2"). We send the captured viewport PNG as the
- * reference `image`, and a structured prompt describing how to re-render it.
+ * Calls the `/v1/images/edits` endpoint with one of the GPT Image models:
+ *   - `gpt-image-2` / `chatgpt-image-latest` — newest, requires org
+ *     verification (settings/organization/general → Verify Organization).
+ *   - `gpt-image-1.5` — works without verification, big quality bump over v1.
+ *   - `gpt-image-1` — baseline, always available.
+ *   - `gpt-image-1-mini` — cheapest.
+ *
+ * We default to `gpt-image-1.5` so it works on unverified orgs. Override via
+ * `VITE_OPENAI_IMAGE_MODEL` once verification lands.
  *
  * ⚠️ Security: This embeds `VITE_OPENAI_API_KEY` in the client bundle. That
  * is fine for a local hackathon demo but unacceptable for production — any
@@ -15,7 +20,7 @@
 
 const API_KEY = import.meta.env.VITE_OPENAI_API_KEY as string | undefined
 const DEFAULT_MODEL =
-  (import.meta.env.VITE_OPENAI_IMAGE_MODEL as string | undefined) ?? 'gpt-image-1'
+  (import.meta.env.VITE_OPENAI_IMAGE_MODEL as string | undefined) ?? 'gpt-image-1.5'
 const DEFAULT_SIZE =
   (import.meta.env.VITE_OPENAI_IMAGE_SIZE as string | undefined) ?? '1024x1024'
 
@@ -68,6 +73,11 @@ export async function editImage({
 
   if (!response.ok) {
     const message = await extractErrorMessage(response)
+    if (/verified|verify organization/i.test(message)) {
+      throw new Error(
+        `This model (${model}) needs org verification. Visit https://platform.openai.com/settings/organization/general → "Verify Organization", or set VITE_OPENAI_IMAGE_MODEL=gpt-image-1.5 for a non-gated alternative.`,
+      )
+    }
     throw new Error(`OpenAI image edit failed (${response.status}): ${message}`)
   }
 
