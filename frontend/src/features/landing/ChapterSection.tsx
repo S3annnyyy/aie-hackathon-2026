@@ -1,4 +1,5 @@
 import { type LandingChapter } from './storyChapters'
+import { usePrefersReducedMotion } from './usePrefersReducedMotion'
 
 type ChapterSectionProps = {
   chapter: LandingChapter
@@ -8,7 +9,13 @@ type ChapterSectionProps = {
 }
 
 export function ChapterSection({ chapter, total, isActive, registerRef }: ChapterSectionProps) {
+  const reducedMotion = usePrefersReducedMotion()
   const alignmentClass = chapter.align === 'right' ? 'md:justify-end' : 'md:justify-start'
+
+  const inactiveState = reducedMotion ? 'opacity-80' : 'translate-y-6 opacity-60'
+  const activeState = reducedMotion
+    ? 'border-cream/25 opacity-100'
+    : 'translate-y-0 border-cream/25 opacity-100'
 
   return (
     <section
@@ -21,9 +28,7 @@ export function ChapterSection({ chapter, total, isActive, registerRef }: Chapte
         <article
           className={[
             'pointer-events-auto max-w-xl rounded-3xl border border-cream/10 bg-espresso/55 p-6 shadow-xl shadow-black/25 backdrop-blur-2xl transition-all duration-500 md:p-8',
-            isActive
-              ? 'translate-y-0 border-cream/25 opacity-100'
-              : 'translate-y-6 opacity-60',
+            isActive ? activeState : inactiveState,
           ].join(' ')}
         >
           <header className="flex items-center justify-between gap-3">

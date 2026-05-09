@@ -1,13 +1,16 @@
 import { Link } from 'react-router-dom'
 
+import { usePrefersReducedMotion } from './usePrefersReducedMotion'
+
 type HeroOverlayProps = {
   /** Fade out as the user scrolls past the hero; 0 = fully visible. */
   scrollFade: number
 }
 
 export function HeroOverlay({ scrollFade }: HeroOverlayProps) {
-  const opacity = Math.max(0, 1 - scrollFade * 1.8)
-  const translateY = Math.min(48, scrollFade * 140)
+  const reducedMotion = usePrefersReducedMotion()
+  const opacity = reducedMotion ? 1 : Math.max(0, 1 - scrollFade * 1.8)
+  const translateY = reducedMotion ? 0 : Math.min(48, scrollFade * 140)
 
   return (
     <div

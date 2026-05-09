@@ -1,4 +1,9 @@
+import { useCallback, type KeyboardEvent } from 'react'
+
 import { formatSgd, type FloorStackBand, type ResaleListing } from '../../lib/sampleListing'
+
+const NEXT_KEYS = new Set(['ArrowRight', 'ArrowDown'])
+const PREV_KEYS = new Set(['ArrowLeft', 'ArrowUp'])
 
 type StackPickerProps = {
   listing: ResaleListing
@@ -17,6 +22,33 @@ export function StackPicker({
 }: StackPickerProps) {
   const activeBand: FloorStackBand | undefined = listing.floorStack.find(
     (b) => b.label === stackLabel,
+  )
+
+  const onStackKey = useCallback(
+    (event: KeyboardEvent<HTMLButtonElement>) => {
+      if (!NEXT_KEYS.has(event.key) && !PREV_KEYS.has(event.key)) return
+      event.preventDefault()
+      const index = listing.floorStack.findIndex((b) => b.label === stackLabel)
+      if (index < 0) return
+      const delta = NEXT_KEYS.has(event.key) ? 1 : -1
+      const nextIndex = (index + delta + listing.floorStack.length) % listing.floorStack.length
+      onStackChange(listing.floorStack[nextIndex]!.label)
+    },
+    [listing.floorStack, stackLabel, onStackChange],
+  )
+
+  const onFacingKey = useCallback(
+    (event: KeyboardEvent<HTMLButtonElement>) => {
+      if (!NEXT_KEYS.has(event.key) && !PREV_KEYS.has(event.key)) return
+      event.preventDefault()
+      const index = listing.facingCandidates.indexOf(facing)
+      if (index < 0) return
+      const delta = NEXT_KEYS.has(event.key) ? 1 : -1
+      const nextIndex =
+        (index + delta + listing.facingCandidates.length) % listing.facingCandidates.length
+      onFacingChange(listing.facingCandidates[nextIndex]!)
+    },
+    [listing.facingCandidates, facing, onFacingChange],
   )
 
   return (
@@ -52,6 +84,8 @@ export function StackPicker({
                 type="button"
                 role="radio"
                 aria-checked={isActive}
+                tabIndex={isActive ? 0 : -1}
+                onKeyDown={onStackKey}
                 onClick={() => onStackChange(band.label)}
                 className={[
                   'rounded-2xl border px-3 py-2 text-left transition',
@@ -91,6 +125,8 @@ export function StackPicker({
                 type="button"
                 role="radio"
                 aria-checked={isActive}
+                tabIndex={isActive ? 0 : -1}
+                onKeyDown={onFacingKey}
                 onClick={() => onFacingChange(candidate)}
                 className={[
                   'rounded-full border px-3 py-1.5 text-xs font-medium transition',

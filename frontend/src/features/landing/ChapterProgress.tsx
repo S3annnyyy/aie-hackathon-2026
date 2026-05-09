@@ -20,6 +20,7 @@ export function ChapterProgress({ chapters, activeId, onJump }: ChapterProgressP
             type="button"
             onClick={() => onJump(chapter.id)}
             aria-current={isActive ? 'step' : undefined}
+            aria-label={`Jump to chapter ${chapter.chapter}: ${chapter.title}`}
             className="group relative flex items-center gap-2"
           >
             <span className="text-[10px] font-semibold uppercase tracking-[0.26em] text-cream/60 transition group-hover:text-cream">
