@@ -3,8 +3,15 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Suspense, useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 
-import type { HeroFrame } from './storyChapters'
 import { usePrefersReducedMotion } from './usePrefersReducedMotion'
+
+export type HeroFrame =
+  | 'hero'
+  | 'wide'
+  | 'orbit-block'
+  | 'dolly-in'
+  | 'interior'
+  | 'interior-close'
 
 const HERO_MODEL_URL = '/models/landing-hero.glb'
 

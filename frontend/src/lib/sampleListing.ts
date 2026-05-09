@@ -3,13 +3,15 @@
  * and the Explore page. Shape mirrors a typical public resale listing so we
  * can extend this to user-parsed URLs later without reshaping callers.
  *
- * Source: web-scraped resale listing for 93B Telok Blangah Street 31.
+ * Source: web-scraped resale listing for 105A Depot Road (picked because it
+ * is rendered in Google 3D Maps' photorealistic tile set — the unit-view
+ * camera actually lands on a building, not a grey block).
  */
 
 export type FloorStackBand = {
-  readonly label: string // e.g. "22 to 24"
+  readonly label: string // e.g. "13 to 15"
   readonly recentSale?: {
-    readonly date: string // "Apr 2026"
+    readonly date: string
     readonly priceSgd: number
     readonly psfSgd: number
   }
@@ -29,7 +31,7 @@ export type ResaleListing = {
   readonly street: string
   readonly postal: string
   readonly coordinates: { readonly lat: number; readonly lng: number }
-  readonly flatType: string // "4 Room Flat" / "4A HDB"
+  readonly flatType: string
   readonly bedrooms: number
   readonly bathrooms: number
   readonly areaSqft: number
@@ -38,7 +40,7 @@ export type ResaleListing = {
   readonly negotiable: boolean
   readonly topYear: number
   readonly leaseYears: number
-  readonly listedOn: string // ISO date
+  readonly listedOn: string
   readonly listingUrl: string
   readonly agent: { readonly name: string; readonly agency: string }
   readonly facingCandidates: readonly string[]
@@ -48,46 +50,42 @@ export type ResaleListing = {
 }
 
 export const SAMPLE_LISTING: ResaleListing = {
-  id: '500001283',
-  address: '93B Telok Blangah Street 31',
-  block: '93B',
-  street: 'Telok Blangah Street 31',
-  postal: '091093',
-  coordinates: { lat: 1.27022, lng: 103.81048 },
+  id: '500114919',
+  address: '105A Depot Road',
+  block: '105A',
+  street: 'Depot Road',
+  postal: '102105',
+  coordinates: { lat: 1.27985, lng: 103.80476 },
   flatType: '4 Room Flat',
   bedrooms: 3,
   bathrooms: 2,
-  areaSqft: 1001,
-  priceSgd: 950_000,
-  psfSgd: 949,
-  negotiable: false,
-  topYear: 2018,
+  areaSqft: 990,
+  priceSgd: 868_000,
+  psfSgd: 877,
+  negotiable: true,
+  topYear: 2016,
   leaseYears: 99,
   listedOn: '2026-05-08',
-  listingUrl:
-    'https://www.propertyguru.com.sg/listing/hdb-for-sale-93b-telok-blangah-street-31-500001283',
-  agent: { name: 'Eugene Lin', agency: 'PROPNEX REALTY PTE. LTD.' },
-  // Listing copy calls out a "bright north–south orientation"; keep corridor
-  // facings as candidates for the camera demo.
+  listingUrl: 'https://www.propertyguru.com.sg/listing/hdb-for-sale-105a-depot-road-500114919',
+  agent: { name: 'Kenny Ter', agency: 'PROPNEX REALTY PTE. LTD.' },
+  // Listing copy: "highly coveted North-South facing, Zero West sun".
   facingCandidates: ['North', 'North-East', 'East', 'South-East', 'South'],
-  // No price history is published for this block, so we seed the typical
-  // 40-storey Telok Blangah stack bands so the picker still demos.
   floorStack: [
-    { label: '07 to 09' },
-    { label: '13 to 15' },
-    { label: '19 to 21' },
-    { label: '25 to 27' },
-    { label: '31 to 33' },
+    { label: '04 to 06', recentSale: { date: 'Apr 2025', priceSgd: 800_000, psfSgd: 808 } },
+    { label: '07 to 09', recentSale: { date: 'Dec 2025', priceSgd: 836_000, psfSgd: 844 } },
+    { label: '10 to 12', recentSale: { date: 'Sep 2025', priceSgd: 815_000, psfSgd: 823 } },
+    { label: '13 to 15', recentSale: { date: 'Feb 2026', priceSgd: 845_000, psfSgd: 853 } },
   ],
   nearestTransit: [
-    { code: 'CC27', name: 'Labrador Park MRT', walkMinutes: 10, distanceMeters: 860 },
-    { code: 'CC28', name: 'Telok Blangah MRT', walkMinutes: 11, distanceMeters: 880 },
+    { code: 'EW18', name: 'Redhill MRT', walkMinutes: 15, distanceMeters: 1100 },
+    { code: 'CC27', name: 'Labrador Park MRT', walkMinutes: 10, distanceMeters: 750 },
+    { code: 'CC28', name: 'Telok Blangah MRT', walkMinutes: 12, distanceMeters: 900 },
   ],
   highlights: [
-    'Bright north–south orientation, corner unit',
-    'TOP Dec 2018 · 99-year lease',
-    'Near Mount Faber Park, Henderson Waves, Southern Ridges',
-    'Walk to VivoCity, HarbourFront, Mapletree Business City',
+    'Squarish 990 sqft layout, three intact bedrooms',
+    'Rare "young flat" — TOP 2016, ~90 years left on the lease',
+    'North–South facing, zero West sun',
+    'Depot Heights mall + NTUC at the doorstep',
   ],
 }
 

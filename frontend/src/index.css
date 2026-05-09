@@ -88,6 +88,50 @@ body {
   }
 }
 
+/* Landing Chapter 01 — Pinterest-style auto-scrolling columns. The column
+ * markup duplicates its tiles so a single -50% translate loops seamlessly. */
+@keyframes stackview-marquee-up {
+  0% {
+    transform: translateY(0);
+  }
+  100% {
+    transform: translateY(-50%);
+  }
+}
+
+@keyframes stackview-marquee-down {
+  0% {
+    transform: translateY(-50%);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
+/* Chapter 02 — sequential spotlight on the three "views" tiles. */
+@keyframes stackview-tile-pulse {
+  0%, 100% {
+    box-shadow: 0 1px 0 rgba(42, 34, 27, 0.08);
+    transform: translateY(0);
+  }
+  40%, 60% {
+    box-shadow: 0 30px 60px -20px rgba(184, 107, 75, 0.45);
+    transform: translateY(-6px);
+  }
+}
+
+/* Chapter 03 — windows lighting up one at a time to suggest stack picker. */
+@keyframes stackview-window-glow {
+  0%, 85%, 100% {
+    fill: #3d3028;
+    opacity: 0.32;
+  }
+  90%, 96% {
+    fill: #f5c7a6;
+    opacity: 1;
+  }
+}
+
 /* --- Legacy card classes (used by existing editor screens until we migrate them) --- */
 .card {
   background: var(--surface-paper);

@@ -1,12 +1,3 @@
-/**
- * Landing-page scroll story for StackView.
- *
- * `frame` is a hint consumed by `HeroCanvas`: how the 3D model should be
- * framed during each chapter. Cameras are tuned in the canvas, not here —
- * this is a semantic label, not raw world-space.
- */
-export type HeroFrame = 'hero' | 'wide' | 'orbit-block' | 'dolly-in' | 'interior' | 'interior-close'
-
 export type LandingChapter = {
   readonly id: string
   readonly chapter: string
@@ -15,7 +6,6 @@ export type LandingChapter = {
   readonly summary: string
   readonly points: readonly string[]
   readonly chips: readonly string[]
-  readonly frame: HeroFrame
 }
 
 export const LANDING_CHAPTERS: readonly LandingChapter[] = [
@@ -23,16 +13,15 @@ export const LANDING_CHAPTERS: readonly LandingChapter[] = [
     id: 'problem',
     chapter: '01',
     kicker: 'The problem',
-    title: 'Resale flats don’t let you feel the place before you sign.',
+    title: 'Three hundred Pinterest pins, zero floor plans.',
     summary:
-      'Brochures show floor plans and agent photos. Neither tells you if the living room gets morning light, which wall shares the lift core, or whether the “good facing” actually faces the MRT. Buyers resort to three in-person viewings per shortlist and still guess at the finish.',
+      'Resale buyers stockpile inspiration and then stall. The unit they viewed last weekend blurs together with the three they saw this one. They can’t remember which living room gets evening light or which bedroom shared a wall with the lift core.',
     points: [
       'Listings hide floor-level and facing in the body text',
       'Agent photos are staged for hype, not decisions',
       'Pinterest mood boards do not map to the shell you just bought',
     ],
-    chips: ['Information asymmetry', 'Decision fatigue', 'Staged photos'],
-    frame: 'wide',
+    chips: ['Decision fatigue', 'Information asymmetry', 'Pinterest ≠ blueprint'],
   },
   {
     id: 'solution',
@@ -47,7 +36,6 @@ export const LANDING_CHAPTERS: readonly LandingChapter[] = [
       'Photoreal: the room rendered with your style, from your camera',
     ],
     chips: ['3D Maps', 'Floor plan → GLB', 'GPT Image render'],
-    frame: 'orbit-block',
   },
   {
     id: 'explore',
@@ -62,7 +50,6 @@ export const LANDING_CHAPTERS: readonly LandingChapter[] = [
       'Altitude = stack midpoint × 3.2m floor height',
     ],
     chips: ['Real resale data', 'Sub-second camera', 'No basement rates'],
-    frame: 'dolly-in',
   },
   {
     id: 'design',
@@ -77,7 +64,6 @@ export const LANDING_CHAPTERS: readonly LandingChapter[] = [
       'Drop a reference photo to transfer palette and props',
     ],
     chips: ['Blender pipeline', 'LLM tool-use', 'Live GLB regen'],
-    frame: 'interior',
   },
   {
     id: 'validate',
@@ -92,6 +78,5 @@ export const LANDING_CHAPTERS: readonly LandingChapter[] = [
       'Download the PNG, send it to your ID or family group chat',
     ],
     chips: ['GPT Image', 'Geometry-faithful', 'One-click export'],
-    frame: 'interior-close',
   },
 ]
