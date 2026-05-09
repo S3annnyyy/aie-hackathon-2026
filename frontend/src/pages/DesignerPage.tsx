@@ -4,8 +4,10 @@ import { ChatPanel, type ChatPanelHandle } from '../features/chat/ChatPanel'
 import { InspirePanel } from '../features/chat/InspirePanel'
 import { LayoutList } from '../features/layouts/LayoutList'
 import { SchemaEditor } from '../features/layouts/SchemaEditor'
+import { RenderPanel } from '../features/render/RenderPanel'
 import { UploadPanel } from '../features/upload/UploadPanel'
-import { Viewer3D } from '../features/viewer3d/Viewer3D'
+import { Viewer3D, type Viewer3DHandle } from '../features/viewer3d/Viewer3D'
+import type { Room } from '../lib/api'
 import {
   exportDxf,
   fixSchema,
@@ -25,6 +27,8 @@ import {
 
 export default function DesignerPage() {
   const chatRef = useRef<ChatPanelHandle>(null)
+  const viewerRef = useRef<Viewer3DHandle>(null)
+  const [selectedRoom, setSelectedRoom] = useState<Room | null>(null)
   const [busy, setBusy] = useState(false)
   const [project, setProject] = useState<ProjectSummary | null>(null)
   const [layouts, setLayouts] = useState<LayoutSummary[]>([])
@@ -258,7 +262,12 @@ export default function DesignerPage() {
             )}
           </div>
 
-          <Viewer3D glbUrl={glbUrl} schema={selectedLayout?.schema ?? null} />
+          <Viewer3D
+            ref={viewerRef}
+            glbUrl={glbUrl}
+            schema={selectedLayout?.schema ?? null}
+            onRoomSelect={setSelectedRoom}
+          />
         </div>
 
         <div className="space-y-4">
@@ -274,6 +283,12 @@ export default function DesignerPage() {
             ref={chatRef}
             layoutId={selectedLayoutId}
             onGlbReady={onGlbReady}
+            disabled={busy}
+          />
+          <RenderPanel
+            viewerRef={viewerRef}
+            schema={selectedLayout?.schema ?? null}
+            selectedRoom={selectedRoom}
             disabled={busy}
           />
           <SchemaEditor
