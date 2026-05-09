@@ -1,25 +1,31 @@
 {
-  "name": "interior-frontend-test",
+  "name": "aie-hackathon-frontend",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "tsc -b --noEmit"
   },
   "dependencies": {
+    "@googlemaps/js-api-loader": "^1.16.10",
     "@react-three/drei": "^9.122.0",
     "@react-three/fiber": "^8.18.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-router-dom": "^6.30.0",
     "three": "^0.181.1"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.1.14",
+    "@types/google.maps": "^3.58.1",
     "@types/react": "^18.3.8",
     "@types/react-dom": "^18.3.0",
     "@types/three": "^0.181.0",
     "@vitejs/plugin-react": "^6.0.1",
+    "tailwindcss": "^4.1.14",
     "typescript": "~6.0.2",
     "vite": "^8.0.10"
   }

@@ -1,67 +1,104 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens — earthy terracotta & cream.
+ * Exposed as CSS custom properties so non-Tailwind code (inline styles,
+ * legacy components) can reference them via var(--token-name).
+ */
 :root {
-  --bg: #f6f3ee;
-  --panel: #ffffff;
-  --text: #1b1f24;
-  --subtext: #5b6570;
-  --accent: #0f766e;
-  --border: #d6d3cf;
+  /* Surfaces */
+  --surface-cream: #f5efe6;
+  --surface-warm: #ebe3d4;
+  --surface-paper: #fdfaf4;
+  --surface-overlay: rgba(42, 34, 27, 0.72);
+
+  /* Brand */
+  --primary-terracotta: #b86b4b;
+  --primary-terracotta-dark: #8f4f34;
+  --primary-terracotta-soft: rgba(184, 107, 75, 0.12);
+
+  /* Text */
+  --text-espresso: #2a221b;
+  --text-muted: #6b5d4d;
+  --text-subtle: #9a8a78;
+
+  /* Accent / supporting */
+  --accent-sage: #7c8a6a;
+  --accent-sage-soft: rgba(124, 138, 106, 0.16);
+
+  /* Borders */
+  --border-warm: rgba(42, 34, 27, 0.12);
+  --border-warm-strong: rgba(42, 34, 27, 0.24);
+
+  /* Focus ring */
+  --focus-ring: rgba(184, 107, 75, 0.45);
 }
 
-* {
-  box-sizing: border-box;
+@theme {
+  --color-cream: #f5efe6;
+  --color-warm: #ebe3d4;
+  --color-paper: #fdfaf4;
+  --color-terracotta: #b86b4b;
+  --color-terracotta-dark: #8f4f34;
+  --color-espresso: #2a221b;
+  --color-muted: #6b5d4d;
+  --color-subtle: #9a8a78;
+  --color-sage: #7c8a6a;
+  --color-line: rgba(42, 34, 27, 0.12);
+  --font-display: 'Fraunces', 'Playfair Display', Georgia, serif;
+  --font-sans: 'Manrope', 'Inter', system-ui, sans-serif;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  width: 100%;
 }
 
 body {
   margin: 0;
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  background: radial-gradient(circle at top left, #e6f4ef, var(--bg) 45%);
-  color: var(--text);
+  font-family: var(--font-sans);
+  background: var(--surface-cream);
+  color: var(--text-espresso);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-button {
-  cursor: pointer;
-  border: 1px solid var(--border);
-  background: var(--panel);
-  padding: 0.55rem 0.8rem;
-  border-radius: 10px;
+/* Focus styles — consistent across buttons/inputs/links */
+:focus-visible {
+  outline: 2px solid var(--primary-terracotta);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
-input,
-textarea,
-select {
-  width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 0.55rem;
-  background: #fff;
+/* Scrollbar: subtle, matches palette */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-warm-strong) transparent;
 }
 
-textarea {
-  min-height: 220px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
-.page {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 1rem;
-}
-
-.grid {
-  display: grid;
-  grid-template-columns: 320px 1fr 460px;
-  gap: 1rem;
-}
-
+/* --- Legacy card classes (used by existing editor screens until we migrate them) --- */
 .card {
-  background: var(--panel);
-  border: 1px solid var(--border);
+  background: var(--surface-paper);
+  border: 1px solid var(--border-warm);
   border-radius: 14px;
   padding: 0.9rem;
+  box-shadow: 0 1px 0 rgba(42, 34, 27, 0.02);
 }
 
 .muted {
-  color: var(--subtext);
+  color: var(--text-muted);
   font-size: 0.92rem;
 }
 
@@ -71,14 +108,16 @@ textarea {
 }
 
 .layout-item {
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-warm);
   border-radius: 10px;
   padding: 0.6rem;
+  background: var(--surface-paper);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
 .layout-item.active {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.15);
+  border-color: var(--primary-terracotta);
+  box-shadow: 0 0 0 2px var(--primary-terracotta-soft);
 }
 
 .toolbar {
@@ -89,22 +128,67 @@ textarea {
 
 .viewer-wrap {
   height: 420px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-warm);
   border-radius: 12px;
   overflow: hidden;
+  background: var(--surface-warm);
 }
 
 .badge {
   display: inline-block;
-  padding: 0.18rem 0.45rem;
+  padding: 0.18rem 0.5rem;
   border-radius: 20px;
-  background: #e7f5f3;
-  color: #0b5d57;
+  background: var(--accent-sage-soft);
+  color: var(--accent-sage);
   font-size: 0.78rem;
+  font-weight: 600;
 }
 
-@media (max-width: 1120px) {
-  .grid {
-    grid-template-columns: 1fr;
-  }
+button {
+  cursor: pointer;
+  border: 1px solid var(--border-warm);
+  background: var(--surface-paper);
+  padding: 0.55rem 0.9rem;
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-espresso);
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--primary-terracotta);
+  background: var(--surface-warm);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+input,
+textarea,
+select {
+  width: 100%;
+  border: 1px solid var(--border-warm);
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
+  background: var(--surface-paper);
+  font-family: inherit;
+  color: var(--text-espresso);
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--primary-terracotta);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--primary-terracotta-soft);
+}
+
+textarea {
+  min-height: 220px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  resize: vertical;
 }
