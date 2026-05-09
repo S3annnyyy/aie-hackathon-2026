@@ -8,10 +8,13 @@ import { HeroOverlay } from '../features/landing/HeroOverlay'
 import { LANDING_CHAPTERS } from '../features/landing/storyChapters'
 import { useActiveChapter } from '../features/landing/useActiveChapter'
 import { useScrollProgress } from '../features/landing/useScrollProgress'
+import { SAMPLE_LISTING } from '../lib/sampleListing'
 
 export default function LandingPage() {
   const progress = useScrollProgress()
   const { activeId, registerRef } = useActiveChapter(LANDING_CHAPTERS)
+  const activeChapter =
+    LANDING_CHAPTERS.find((c) => c.id === activeId) ?? LANDING_CHAPTERS[0]!
 
   const onJump = useCallback((id: string) => {
     const node = document.querySelector<HTMLElement>(`[data-chapter-id="${id}"]`)
@@ -20,33 +23,57 @@ export default function LandingPage() {
   }, [])
 
   return (
-    <div className="relative">
-      {/* Sticky 3D hero: the canvas is pinned behind the scrolling chapters. */}
-      <div className="pointer-events-none fixed inset-0 z-0 h-screen w-full">
-        <HeroCanvas progress={progress} />
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent via-espresso/40 to-espresso/85" />
+    <>
+      {/* Act 1 — full-bleed hero. */}
+      <section className="relative h-screen w-full overflow-hidden bg-espresso">
+        <HeroCanvas progress={progress} frame="hero" background="#1a1410" fog />
         <HeroOverlay scrollFade={progress} />
-      </div>
+        <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center">
+          <div className="rounded-full border border-cream/15 bg-espresso/40 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.26em] text-cream/80 backdrop-blur-xl">
+            Scroll to explore
+          </div>
+        </div>
+      </section>
 
-      <ChapterProgress chapters={LANDING_CHAPTERS} activeId={activeId} onJump={onJump} />
+      {/*
+        Act 2 — split layout. Left rail scrolls through chapters, right rail
+        is a sticky 3D panel that reframes per active chapter. No overlap: the
+        canvas lives in its own column.
+      */}
+      <section className="relative bg-cream">
+        <ChapterProgress chapters={LANDING_CHAPTERS} activeId={activeId} onJump={onJump} />
 
-      <div className="relative z-10">
-        {/* Spacer that matches the initial hero viewport so the first chapter starts below it. */}
-        <div className="h-screen" aria-hidden />
+        <div className="mx-auto grid max-w-[1400px] gap-10 px-6 py-16 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-16 lg:px-10">
+          {/* Left rail: one chapter card per ~viewport. */}
+          <div className="space-y-0">
+            {LANDING_CHAPTERS.map((chapter) => (
+              <ChapterSection
+                key={chapter.id}
+                chapter={chapter}
+                total={LANDING_CHAPTERS.length}
+                isActive={chapter.id === activeId}
+                registerRef={registerRef}
+              />
+            ))}
+          </div>
 
-        {LANDING_CHAPTERS.map((chapter) => (
-          <ChapterSection
-            key={chapter.id}
-            chapter={chapter}
-            total={LANDING_CHAPTERS.length}
-            isActive={chapter.id === activeId}
-            registerRef={registerRef}
-          />
-        ))}
+          {/* Right rail: sticky 3D panel — reframes based on active chapter. */}
+          <div className="relative hidden lg:block">
+            <div className="sticky top-24 h-[calc(100vh-8rem)]">
+              <div className="relative h-full w-full overflow-hidden rounded-[2rem] border border-line bg-espresso shadow-xl shadow-black/20">
+                <HeroCanvas frame={activeChapter.frame} background="#1a1410" />
+                <div className="pointer-events-none absolute inset-x-4 bottom-4 flex items-center justify-between rounded-full bg-espresso/50 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.24em] text-cream/80 backdrop-blur">
+                  <span>Chapter {activeChapter.chapter}</span>
+                  <span aria-live="polite">{activeChapter.kicker}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
 
-        {/* Closing CTA — transitions out of the espresso story back into the cream product surface. */}
-        <section className="relative px-6 py-24 md:px-16 md:py-32">
-          <div className="mx-auto max-w-3xl rounded-[2.5rem] border border-cream/10 bg-cream p-10 text-center text-espresso shadow-[0_30px_80px_-30px_rgba(0,0,0,0.55)] md:p-14">
+        {/* Act 3 — closing CTA. */}
+        <div className="px-6 pb-24 pt-8 md:px-10 md:pb-32">
+          <div className="mx-auto max-w-3xl rounded-[2.5rem] border border-line bg-paper p-10 text-center text-espresso shadow-xl shadow-black/5 md:p-14">
             <p className="text-xs font-semibold uppercase tracking-[0.32em] text-terracotta">
               Ready?
             </p>
@@ -54,7 +81,7 @@ export default function LandingPage() {
               Pick a listing. Step inside.
             </h2>
             <p className="mt-4 text-base leading-relaxed text-muted md:text-lg">
-              We’ll walk you through a real resale flat at 90A Telok Blangah — outside,
+              We’ll walk you through a real resale flat at {SAMPLE_LISTING.address} — outside,
               inside, and under afternoon sunlight.
             </p>
             <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
@@ -72,8 +99,8 @@ export default function LandingPage() {
               </Link>
             </div>
           </div>
-        </section>
-      </div>
-    </div>
+        </div>
+      </section>
+    </>
   )
 }

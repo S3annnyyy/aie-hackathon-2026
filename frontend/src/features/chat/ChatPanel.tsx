@@ -111,7 +111,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel(
   return (
     <div className="card">
       <h3>Interior Designer Chat</h3>
-      <p className="muted">Tell Pascal what you want. Edits re-render the 3D view.</p>
+      <p className="muted">Tell StackView what you want. Edits re-render the 3D view.</p>
       <div
         style={{
           maxHeight: 340,
@@ -163,7 +163,7 @@ function ChatRow({ entry }: { entry: ChatEntry }) {
   if (entry.kind === 'assistant') {
     return (
       <div style={{ margin: '0.35rem 0' }}>
-        <strong>Pascal:</strong> {entry.text}
+        <strong>StackView:</strong> {entry.text}
       </div>
     )
   }

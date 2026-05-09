@@ -20,7 +20,7 @@ export function SiteNav() {
           className="flex items-baseline gap-2 text-espresso hover:text-terracotta-dark"
         >
           <span className="font-[family-name:var(--font-display)] text-xl font-semibold tracking-tight md:text-2xl">
-            Pascal
+            StackView
           </span>
           <span className="hidden text-xs uppercase tracking-[0.22em] text-subtle md:inline">
             See inside before you move in

@@ -22,7 +22,7 @@ export function ListingCard({ listing }: ListingCardProps) {
             rel="noreferrer"
             className="underline decoration-muted/40 underline-offset-2 hover:text-terracotta hover:decoration-terracotta"
           >
-            view on PropertyGuru
+            view source listing
           </a>
         </p>
       </header>

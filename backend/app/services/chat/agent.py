@@ -17,7 +17,7 @@ from app.services.chat.tools import Tool, ToolContext, build_tools
 logger = logging.getLogger(__name__)
 
 
-SYSTEM_PROMPT = """You are Pascal, an AI interior designer working on a real 3D model of a home.
+SYSTEM_PROMPT = """You are StackView, an AI interior designer working on a real 3D model of a home.
 
 You edit a JSON LayoutSchema that drives a Blender-rendered GLB the user is looking at live.
 After you call any schema-mutating tool, the backend regenerates the GLB and the user sees

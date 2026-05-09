@@ -20,7 +20,7 @@ export function HeroOverlay({ scrollFade }: HeroOverlayProps) {
       <div className="pointer-events-auto flex items-start justify-between">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-terracotta">
-            Pascal
+            StackView
           </p>
           <p className="mt-2 font-[family-name:var(--font-display)] text-sm text-cream/85 md:text-base">
             An AI interior designer for Singapore resale flats.
@@ -50,7 +50,7 @@ export function HeroOverlay({ scrollFade }: HeroOverlayProps) {
         </h1>
         <p className="mt-6 max-w-xl text-base leading-relaxed text-cream/75 md:text-lg">
           Three hundred Pinterest pins don't tell you if the living room gets
-          morning light. Pascal does. Stand at the window. Design the rooms.
+          morning light. StackView does. Stand at the window. Design the rooms.
           Decide from your laptop.
         </p>
         <div className="mt-8 flex flex-wrap items-center gap-3">

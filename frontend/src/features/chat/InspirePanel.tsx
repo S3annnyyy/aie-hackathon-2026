@@ -43,7 +43,7 @@ export function InspirePanel({ layoutId, schema, onStream, disabled }: Props) {
   return (
     <div className="card">
       <h3>📷 Inspire from Photo</h3>
-      <p className="muted">Upload a reference interior. Pascal analyses style + objects and restyles the target room.</p>
+      <p className="muted">Upload a reference interior. StackView analyses style + objects and restyles the target room.</p>
 
       <input
         ref={fileRef}
@@ -73,7 +73,7 @@ export function InspirePanel({ layoutId, schema, onStream, disabled }: Props) {
           disabled={!layoutId || busy || disabled}
           style={{ width: '100%' }}
         >
-          <option value="">Auto (Pascal picks)</option>
+          <option value="">Auto (StackView picks)</option>
           {rooms.map((r) => (
             <option key={r.id} value={r.name || r.id}>
               {r.name || r.id} ({r.type})

@@ -1,9 +1,9 @@
 /**
  * Real resale listing used as the default demo target on the landing page
- * and the Explore page. Mirrors the shape of PropertyGuru's resale detail
- * view so we can extend this to parsed URLs later without reshaping callers.
+ * and the Explore page. Shape mirrors a typical public resale listing so we
+ * can extend this to user-parsed URLs later without reshaping callers.
  *
- * Source: PropertyGuru listing 500077059 (90A Telok Blangah Street 31).
+ * Source: web-scraped resale listing for 93B Telok Blangah Street 31.
  */
 
 export type FloorStackBand = {
@@ -48,41 +48,46 @@ export type ResaleListing = {
 }
 
 export const SAMPLE_LISTING: ResaleListing = {
-  id: '500077059',
-  address: '90A Telok Blangah Street 31',
-  block: '90A',
+  id: '500001283',
+  address: '93B Telok Blangah Street 31',
+  block: '93B',
   street: 'Telok Blangah Street 31',
-  postal: '091090',
-  coordinates: { lat: 1.27107, lng: 103.81166 },
+  postal: '091093',
+  coordinates: { lat: 1.27022, lng: 103.81048 },
   flatType: '4 Room Flat',
   bedrooms: 3,
   bathrooms: 2,
   areaSqft: 1001,
-  priceSgd: 933_000,
-  psfSgd: 932,
-  negotiable: true,
+  priceSgd: 950_000,
+  psfSgd: 949,
+  negotiable: false,
   topYear: 2018,
   leaseYears: 99,
   listedOn: '2026-05-08',
   listingUrl:
-    'https://www.propertyguru.com.sg/listing/hdb-for-sale-90a-telok-blangah-street-31-500077059',
-  agent: { name: 'Lin Sallee 林玥廷', agency: 'HUTTONS ASIA PTE LTD' },
+    'https://www.propertyguru.com.sg/listing/hdb-for-sale-93b-telok-blangah-street-31-500001283',
+  agent: { name: 'Eugene Lin', agency: 'PROPNEX REALTY PTE. LTD.' },
+  // Listing copy calls out a "bright north–south orientation"; keep corridor
+  // facings as candidates for the camera demo.
   facingCandidates: ['North', 'North-East', 'East', 'South-East', 'South'],
+  // No price history is published for this block, so we seed the typical
+  // 40-storey Telok Blangah stack bands so the picker still demos.
   floorStack: [
-    { label: '07 to 09', recentSale: { date: 'Mar 2026', priceSgd: 919_000, psfSgd: 918 } },
-    { label: '19 to 21', recentSale: { date: 'Dec 2025', priceSgd: 988_000, psfSgd: 987 } },
-    { label: '22 to 24', recentSale: { date: 'Apr 2026', priceSgd: 1_000_000, psfSgd: 999 } },
-    { label: '25 to 27', recentSale: { date: 'Mar 2026', priceSgd: 1_040_000, psfSgd: 1039 } },
+    { label: '07 to 09' },
+    { label: '13 to 15' },
+    { label: '19 to 21' },
+    { label: '25 to 27' },
+    { label: '31 to 33' },
   ],
   nearestTransit: [
-    { code: 'CC28', name: 'Telok Blangah MRT', walkMinutes: 8, distanceMeters: 670 },
-    { code: 'CC27', name: 'Labrador Park MRT', walkMinutes: 9, distanceMeters: 780 },
+    { code: 'CC27', name: 'Labrador Park MRT', walkMinutes: 10, distanceMeters: 860 },
+    { code: 'CC28', name: 'Telok Blangah MRT', walkMinutes: 11, distanceMeters: 880 },
   ],
   highlights: [
-    '670 m (8 min walk) from CC28 Telok Blangah MRT',
+    'Bright north–south orientation, corner unit',
     'TOP Dec 2018 · 99-year lease',
-    'Near Mount Faber Park, Southern Ridges, VivoCity',
-    'Greater Southern Waterfront upside',
+    'Near Mount Faber Park, Henderson Waves, Southern Ridges',
+    'Walk to VivoCity, HarbourFront, Mapletree Business City',
   ],
 }
 

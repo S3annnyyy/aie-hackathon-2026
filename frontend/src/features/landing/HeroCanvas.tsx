@@ -3,20 +3,34 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Suspense, useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 
+import type { HeroFrame } from './storyChapters'
 import { usePrefersReducedMotion } from './usePrefersReducedMotion'
 
 const HERO_MODEL_URL = '/models/landing-hero.glb'
 
-type HeroCanvasProps = {
+export type HeroCanvasProps = {
   /**
-   * Scroll progress in [0, 1]. The hero camera tilts down and dollies in as
-   * progress rises, so the landing story feels like you are leaning closer
-   * to the model as you scroll.
+   * Scroll progress in [0, 1]. Drives the Act 1 hero camera push-in; ignored
+   * once a `frame` is set, so the split-panel chapters don't fight.
    */
-  progress: number
+  progress?: number
+  /**
+   * Discrete framing driven by the active landing chapter. Falls back to
+   * `"hero"` for the landing hero section.
+   */
+  frame?: HeroFrame
+  /** Paints the canvas background. Transparent by default so split panels can show their own surface. */
+  background?: string | null
+  /** Show fog? Only looks right on dark backgrounds. */
+  fog?: boolean
 }
 
-export function HeroCanvas({ progress }: HeroCanvasProps) {
+export function HeroCanvas({
+  progress = 0,
+  frame = 'hero',
+  background = null,
+  fog = false,
+}: HeroCanvasProps) {
   const reducedMotion = usePrefersReducedMotion()
 
   return (
@@ -24,17 +38,17 @@ export function HeroCanvas({ progress }: HeroCanvasProps) {
       shadows
       dpr={[1, 2]}
       camera={{ position: [4, 3, 4], fov: 38, near: 0.1, far: 100 }}
-      gl={{ antialias: true, powerPreference: 'high-performance' }}
+      gl={{ antialias: true, powerPreference: 'high-performance', alpha: background === null }}
       className="h-full w-full"
     >
-      <color attach="background" args={['#1a1410']} />
-      <fog attach="fog" args={['#1a1410', 12, 28]} />
+      {background !== null ? <color attach="background" args={[background]} /> : null}
+      {fog ? <fog attach="fog" args={['#1a1410', 12, 28]} /> : null}
 
-      <ambientLight intensity={0.35} />
+      <ambientLight intensity={0.4} />
       <directionalLight
         castShadow
         position={[6, 8, 4]}
-        intensity={1.4}
+        intensity={1.3}
         shadow-mapSize-width={2048}
         shadow-mapSize-height={2048}
       />
@@ -53,15 +67,11 @@ export function HeroCanvas({ progress }: HeroCanvasProps) {
         />
       </Suspense>
 
-      <CinematicCamera progress={progress} reducedMotion={reducedMotion} />
+      <CinematicCamera progress={progress} frame={frame} reducedMotion={reducedMotion} />
     </Canvas>
   )
 }
 
-/**
- * Loads the hero GLB, centers it on the origin, and normalizes its scale so
- * its longest side is ~4 world units regardless of source scene units.
- */
 function GroupModel() {
   const { scene } = useGLTF(HERO_MODEL_URL)
 
@@ -94,22 +104,48 @@ function GroupModel() {
   return <primitive object={prepared} />
 }
 
+type CameraPose = {
+  /** Orbit radius in world units. */
+  radius: number
+  /** Camera Y in world units. */
+  height: number
+  /** Phase offset added to the slow idle orbit, in radians. */
+  phase: number
+  /** Look-at point Y in world units. */
+  targetY: number
+  /** Background orbit speed multiplier. 1 = nominal, 0 = static. */
+  orbitSpeed: number
+}
+
+const FRAME_POSES: Record<HeroFrame, CameraPose> = {
+  hero: { radius: 5.2, height: 2.8, phase: 0, targetY: 1.3, orbitSpeed: 1 },
+  wide: { radius: 6.8, height: 3.6, phase: Math.PI * 0.15, targetY: 1.5, orbitSpeed: 0.7 },
+  'orbit-block': { radius: 4.8, height: 2.4, phase: Math.PI * 0.6, targetY: 1.3, orbitSpeed: 1.2 },
+  'dolly-in': { radius: 3.2, height: 1.8, phase: Math.PI * 0.9, targetY: 1.0, orbitSpeed: 0.5 },
+  interior: { radius: 2.2, height: 1.4, phase: Math.PI * 1.15, targetY: 1.2, orbitSpeed: 0.4 },
+  'interior-close': {
+    radius: 1.6,
+    height: 1.2,
+    phase: Math.PI * 1.4,
+    targetY: 1.1,
+    orbitSpeed: 0.3,
+  },
+}
+
 type CinematicCameraProps = {
   progress: number
+  frame: HeroFrame
   reducedMotion: boolean
 }
 
-/**
- * Orbits the camera slowly while the page is idle, and as the user scrolls
- * we dolly toward the model and tilt down so the landing story feels like
- * approaching a piece in a gallery.
- */
-function CinematicCamera({ progress, reducedMotion }: CinematicCameraProps) {
+function CinematicCamera({ progress, frame, reducedMotion }: CinematicCameraProps) {
   const { camera } = useThree()
   const target = useRef(new THREE.Vector3(0, 1.2, 0))
   const clockStart = useRef<number | null>(null)
   const lastProgress = useRef(progress)
+  const lastFrame = useRef<HeroFrame>(frame)
   lastProgress.current = progress
+  lastFrame.current = frame
 
   useEffect(() => {
     camera.lookAt(target.current)
@@ -119,24 +155,35 @@ function CinematicCamera({ progress, reducedMotion }: CinematicCameraProps) {
     if (clockStart.current === null) clockStart.current = state.clock.elapsedTime
     const elapsed = state.clock.elapsedTime - clockStart.current
 
+    const pose = FRAME_POSES[lastFrame.current] ?? FRAME_POSES.hero
     const rawProgress = THREE.MathUtils.clamp(lastProgress.current, 0, 1)
-    const ease = rawProgress * rawProgress * (3 - 2 * rawProgress) // smoothstep
+    const ease = rawProgress * rawProgress * (3 - 2 * rawProgress)
 
-    const orbitSpeed = reducedMotion ? 0 : 0.08
-    const orbitRadius = THREE.MathUtils.lerp(5.2, 3.6, ease)
-    const orbitY = THREE.MathUtils.lerp(2.8, 1.6, ease)
-    const orbitAngle = elapsed * orbitSpeed
+    // Hero chapter gets the scroll-driven push; split-panel chapters use the
+    // frame pose directly.
+    const radius =
+      lastFrame.current === 'hero'
+        ? THREE.MathUtils.lerp(pose.radius, pose.radius * 0.68, ease)
+        : pose.radius
+    const height =
+      lastFrame.current === 'hero'
+        ? THREE.MathUtils.lerp(pose.height, pose.height * 0.58, ease)
+        : pose.height
 
-    const desiredX = Math.sin(orbitAngle) * orbitRadius
-    const desiredZ = Math.cos(orbitAngle) * orbitRadius
-    const desiredY = orbitY
+    const baseOrbitSpeed = reducedMotion ? 0 : 0.07 * pose.orbitSpeed
+    const angle = elapsed * baseOrbitSpeed + pose.phase
 
-    const blend = reducedMotion ? 0.18 : 0.05
+    const desiredX = Math.sin(angle) * radius
+    const desiredZ = Math.cos(angle) * radius
+
+    // A larger blend smoothly interpolates when `frame` switches; we lean on
+    // the lerp rather than per-frame tween libraries.
+    const blend = reducedMotion ? 0.22 : 0.04
     camera.position.x = THREE.MathUtils.lerp(camera.position.x, desiredX, blend)
-    camera.position.y = THREE.MathUtils.lerp(camera.position.y, desiredY, blend)
+    camera.position.y = THREE.MathUtils.lerp(camera.position.y, height, blend)
     camera.position.z = THREE.MathUtils.lerp(camera.position.z, desiredZ, blend)
 
-    target.current.set(0, THREE.MathUtils.lerp(1.3, 0.9, ease), 0)
+    target.current.y = THREE.MathUtils.lerp(target.current.y, pose.targetY, blend)
     camera.lookAt(target.current)
   })
 

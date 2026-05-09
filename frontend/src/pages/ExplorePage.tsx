@@ -23,7 +23,7 @@ export default function ExplorePage() {
         </h1>
         <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted md:text-base">
           A live resale listing we use as the demo target. Pick a stack and
-          window facing to see Pascal rotate to the right pose on Google 3D
+          window facing to see StackView rotate to the right pose on Google 3D
           Maps — and, next, render the view from that exact window.
         </p>
       </header>

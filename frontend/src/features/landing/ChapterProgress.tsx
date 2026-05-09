@@ -23,15 +23,18 @@ export function ChapterProgress({ chapters, activeId, onJump }: ChapterProgressP
             aria-label={`Jump to chapter ${chapter.chapter}: ${chapter.title}`}
             className="group relative flex items-center gap-2"
           >
-            <span className="text-[10px] font-semibold uppercase tracking-[0.26em] text-cream/60 transition group-hover:text-cream">
+            <span
+              className={[
+                'text-[10px] font-semibold uppercase tracking-[0.26em] transition',
+                isActive ? 'text-terracotta' : 'text-muted group-hover:text-espresso',
+              ].join(' ')}
+            >
               {chapter.chapter}
             </span>
             <span
               className={[
                 'h-px w-6 rounded-full transition-all',
-                isActive
-                  ? 'bg-terracotta'
-                  : 'bg-cream/25 group-hover:bg-cream/45',
+                isActive ? 'bg-terracotta' : 'bg-muted/40 group-hover:bg-muted',
               ].join(' ')}
               style={isActive ? { width: 36 } : undefined}
             />

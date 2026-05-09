@@ -81,7 +81,7 @@ export function RenderPanel({ viewerRef, schema, selectedRoom, disabled }: Rende
   }
 
   const downloadHref = state.output?.dataUrl
-  const downloadName = `pascal-render-${selectedRoom?.id ?? 'scene'}-${Date.now()}.png`
+  const downloadName = `stackview-render-${selectedRoom?.id ?? 'scene'}-${Date.now()}.png`
   const busy = state.status === 'capturing' || state.status === 'generating'
 
   return (
