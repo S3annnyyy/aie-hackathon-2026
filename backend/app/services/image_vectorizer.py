@@ -22,6 +22,17 @@ class ImageVectorizer:
         return float(np.hypot(dx, dy))
 
     @staticmethod
+    def _canonical_key(
+        start: tuple[float, float],
+        end: tuple[float, float],
+        *,
+        grid: float = 8.0,
+    ) -> tuple[tuple[int, int], tuple[int, int]]:
+        a = (int(round(start[0] / grid)), int(round(start[1] / grid)))
+        b = (int(round(end[0] / grid)), int(round(end[1] / grid)))
+        return (a, b) if a <= b else (b, a)
+
+    @staticmethod
     def _snap_axis(start: tuple[float, float], end: tuple[float, float]) -> tuple[tuple[float, float], tuple[float, float]] | None:
         dx = end[0] - start[0]
         dy = end[1] - start[1]
@@ -163,6 +174,56 @@ class ImageVectorizer:
         collect_gaps(vertical, is_horizontal=False)
         return openings
 
+    @classmethod
+    def _dedupe_openings(
+        cls,
+        openings: list[tuple[tuple[float, float], tuple[float, float]]],
+    ) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+        unique: dict[tuple[tuple[int, int], tuple[int, int]], tuple[tuple[float, float], tuple[float, float]]] = {}
+        for start, end in openings:
+            snapped = cls._snap_axis(start, end)
+            if not snapped:
+                continue
+            s, e = snapped
+            key = cls._canonical_key(s, e, grid=6.0)
+            previous = unique.get(key)
+            if not previous or cls._segment_length(s, e) > cls._segment_length(previous[0], previous[1]):
+                unique[key] = (s, e)
+        return sorted(unique.values(), key=lambda seg: cls._segment_length(seg[0], seg[1]), reverse=True)
+
+    @classmethod
+    def _window_sensitive_segments(
+        cls,
+        image: np.ndarray,
+        *,
+        min_length: float,
+    ) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+        window_mask = cv2.morphologyEx(
+            image,
+            cv2.MORPH_OPEN,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)),
+            iterations=1,
+        )
+        lines = cv2.HoughLinesP(
+            window_mask,
+            1,
+            np.pi / 180,
+            threshold=80,
+            minLineLength=max(30, int(min_length * 0.6)),
+            maxLineGap=10,
+        )
+        segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
+        if lines is None:
+            return segments
+
+        for line in lines[:200]:
+            x1, y1, x2, y2 = line[0]
+            length = float(np.hypot(x2 - x1, y2 - y1))
+            if length < min_length * 0.55:
+                continue
+            segments.append(((float(x1), float(y1)), (float(x2), float(y2))))
+        return segments
+
     @staticmethod
     def _remove_border_connected_regions(mask: np.ndarray) -> np.ndarray:
         work = mask.copy()
@@ -266,7 +327,21 @@ class ImageVectorizer:
             gap_tol=max(16.0, min(h, w) * 0.04),
             min_length=max(50.0, min(h, w) * 0.045),
         )
-        output.window_segments = self._extract_openings(output.wall_segments, width=w, height=h)
+        window_probe_segments = self._window_sensitive_segments(
+            dark_walls,
+            min_length=max(40.0, min(h, w) * 0.035),
+        )
+        if window_probe_segments:
+            window_probe_segments = self._merge_segments(
+                window_probe_segments,
+                coord_tol=max(8.0, min(h, w) * 0.018),
+                gap_tol=max(12.0, min(h, w) * 0.025),
+                min_length=max(30.0, min(h, w) * 0.03),
+            )
+
+        inferred_openings = self._extract_openings(output.wall_segments, width=w, height=h)
+        probe_openings = self._extract_openings(window_probe_segments, width=w, height=h) if window_probe_segments else []
+        output.window_segments = self._dedupe_openings(inferred_openings + probe_openings)
         if output.window_segments:
             output.todos.append('TODO: Exterior wall openings were inferred from line gaps; verify window placement.')
 

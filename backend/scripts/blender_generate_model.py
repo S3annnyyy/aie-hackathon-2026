@@ -299,18 +299,151 @@ def add_room_marker(name: str, poly: list[list[float]]) -> None:
     obj['room_name'] = name
 
 
-def add_furniture_placeholder(position: list[float], size: list[float], mat: bpy.types.Material, name: str) -> None:
-    x = position[0] if len(position) > 0 else 0
-    y = position[1] if len(position) > 1 else 0
-    z = size[2] / 2 if len(size) > 2 else 0.4
-    sx = size[0] / 2 if len(size) > 0 else 0.5
-    sy = size[1] / 2 if len(size) > 1 else 0.5
-    sz = size[2] / 2 if len(size) > 2 else 0.4
-    bpy.ops.mesh.primitive_cube_add(location=(x, y, z))
+def _add_box(
+    *,
+    name: str,
+    location: tuple[float, float, float],
+    dimensions: tuple[float, float, float],
+    mat: bpy.types.Material,
+    rotation_z: float = 0.0,
+) -> bpy.types.Object:
+    bpy.ops.mesh.primitive_cube_add(location=location)
     obj = bpy.context.active_object
-    obj.scale = (sx, sy, sz)
-    obj.name = f'furniture::{name}'
+    obj.name = name
+    obj.scale = (dimensions[0] / 2, dimensions[1] / 2, dimensions[2] / 2)
+    obj.rotation_euler[2] = rotation_z
     obj.data.materials.append(mat)
+    return obj
+
+
+def _infer_furniture_kind(item: dict) -> str:
+    kind = str(item.get('kind', '')).strip().lower()
+    if kind:
+        return kind
+    label = str(item.get('name', item.get('id', 'item'))).lower()
+    if 'sofa' in label or 'couch' in label:
+        return 'sofa'
+    if 'bed' in label:
+        return 'bed'
+    if 'coffee' in label and 'table' in label:
+        return 'coffee_table'
+    if 'dining' in label and 'table' in label:
+        return 'dining_table'
+    if 'nightstand' in label or 'bedside' in label:
+        return 'nightstand'
+    if 'wardrobe' in label or 'closet' in label:
+        return 'wardrobe'
+    if 'desk' in label:
+        return 'desk'
+    if 'stool' in label:
+        return 'stool'
+    if 'chair' in label:
+        return 'chair'
+    if 'console' in label or 'cabinet' in label or 'tv' in label:
+        return 'console'
+    if 'table' in label:
+        return 'table'
+    return 'generic'
+
+
+def add_furniture_generic(position: list[float], size: list[float], mat: bpy.types.Material, name: str) -> None:
+    x = position[0] if len(position) > 0 else 0.0
+    y = position[1] if len(position) > 1 else 0.0
+    z = size[2] / 2 if len(size) > 2 else 0.4
+    sx = size[0] if len(size) > 0 else 1.0
+    sy = size[1] if len(size) > 1 else 1.0
+    sz = size[2] if len(size) > 2 else 0.8
+    _add_box(name=f'furniture::{name}', location=(x, y, z), dimensions=(sx, sy, sz), mat=mat)
+
+
+def add_furniture_table(position: list[float], size: list[float], wood_mat: bpy.types.Material, dark_mat: bpy.types.Material, name: str) -> None:
+    x = position[0] if len(position) > 0 else 0.0
+    y = position[1] if len(position) > 1 else 0.0
+    width = max(0.45, size[0] if len(size) > 0 else 1.0)
+    depth = max(0.35, size[1] if len(size) > 1 else 0.6)
+    height = max(0.4, size[2] if len(size) > 2 else 0.75)
+    top_thickness = max(0.04, height * 0.12)
+    leg_size = max(0.03, min(width, depth) * 0.06)
+    leg_height = max(0.18, height - top_thickness)
+
+    _add_box(name=f'furniture::{name}::top', location=(x, y, height - top_thickness / 2), dimensions=(width, depth, top_thickness), mat=wood_mat)
+    for dx in (-0.42, 0.42):
+        for dy in (-0.42, 0.42):
+            _add_box(
+                name=f'furniture::{name}::leg',
+                location=(x + (width * dx / 2), y + (depth * dy / 2), leg_height / 2),
+                dimensions=(leg_size, leg_size, leg_height),
+                mat=dark_mat,
+            )
+
+
+def add_furniture_chair(position: list[float], size: list[float], wood_mat: bpy.types.Material, fabric_mat: bpy.types.Material, name: str) -> None:
+    x = position[0] if len(position) > 0 else 0.0
+    y = position[1] if len(position) > 1 else 0.0
+    width = max(0.35, size[0] if len(size) > 0 else 0.5)
+    depth = max(0.35, size[1] if len(size) > 1 else 0.5)
+    height = max(0.7, size[2] if len(size) > 2 else 0.9)
+    seat_h = max(0.04, height * 0.16)
+    back_h = max(0.18, height * 0.55)
+    leg_h = max(0.28, height - seat_h - 0.18)
+    leg_size = max(0.025, min(width, depth) * 0.06)
+
+    _add_box(name=f'furniture::{name}::seat', location=(x, y, leg_h + seat_h / 2), dimensions=(width * 0.92, depth * 0.88, seat_h), mat=fabric_mat)
+    _add_box(name=f'furniture::{name}::back', location=(x, y - depth * 0.34, leg_h + seat_h + back_h / 2), dimensions=(width * 0.78, leg_size * 3.2, back_h), mat=wood_mat)
+    for dx in (-0.4, 0.4):
+        for dy in (-0.35, 0.35):
+            _add_box(
+                name=f'furniture::{name}::leg',
+                location=(x + (width * dx / 2), y + (depth * dy / 2), leg_h / 2),
+                dimensions=(leg_size, leg_size, leg_h),
+                mat=wood_mat,
+            )
+
+
+def add_furniture_sofa(position: list[float], size: list[float], fabric_mat: bpy.types.Material, dark_mat: bpy.types.Material, name: str) -> None:
+    x = position[0] if len(position) > 0 else 0.0
+    y = position[1] if len(position) > 1 else 0.0
+    width = max(1.4, size[0] if len(size) > 0 else 2.2)
+    depth = max(0.8, size[1] if len(size) > 1 else 0.95)
+    height = max(0.7, size[2] if len(size) > 2 else 0.9)
+    base_h = max(0.22, height * 0.28)
+    back_h = max(0.25, height * 0.42)
+    arm_w = max(0.12, width * 0.12)
+
+    _add_box(name=f'furniture::{name}::base', location=(x, y, base_h / 2), dimensions=(width * 0.96, depth * 0.9, base_h), mat=fabric_mat)
+    _add_box(name=f'furniture::{name}::back', location=(x, y - depth * 0.32, base_h + back_h / 2), dimensions=(width * 0.92, depth * 0.22, back_h), mat=fabric_mat)
+    _add_box(name=f'furniture::{name}::arm_l', location=(x - width * 0.38, y, base_h + height * 0.12), dimensions=(arm_w, depth * 0.82, height * 0.52), mat=dark_mat)
+    _add_box(name=f'furniture::{name}::arm_r', location=(x + width * 0.38, y, base_h + height * 0.12), dimensions=(arm_w, depth * 0.82, height * 0.52), mat=dark_mat)
+    _add_box(name=f'furniture::{name}::cushion_l', location=(x - width * 0.18, y + depth * 0.03, base_h + height * 0.18), dimensions=(width * 0.24, depth * 0.42, height * 0.22), mat=fabric_mat)
+    _add_box(name=f'furniture::{name}::cushion_r', location=(x + width * 0.18, y + depth * 0.03, base_h + height * 0.18), dimensions=(width * 0.24, depth * 0.42, height * 0.22), mat=fabric_mat)
+
+
+def add_furniture_bed(position: list[float], size: list[float], wood_mat: bpy.types.Material, fabric_mat: bpy.types.Material, light_mat: bpy.types.Material, name: str) -> None:
+    x = position[0] if len(position) > 0 else 0.0
+    y = position[1] if len(position) > 1 else 0.0
+    width = max(1.4, size[0] if len(size) > 0 else 2.0)
+    depth = max(1.2, size[1] if len(size) > 1 else 1.6)
+    height = max(0.5, size[2] if len(size) > 2 else 0.65)
+    frame_h = max(0.14, height * 0.24)
+    mattress_h = max(0.2, height * 0.38)
+    headboard_h = max(0.4, height * 0.72)
+    pillow_h = max(0.08, height * 0.16)
+
+    _add_box(name=f'furniture::{name}::frame', location=(x, y, frame_h / 2), dimensions=(width, depth, frame_h), mat=wood_mat)
+    _add_box(name=f'furniture::{name}::mattress', location=(x, y, frame_h + mattress_h / 2), dimensions=(width * 0.95, depth * 0.9, mattress_h), mat=fabric_mat)
+    _add_box(name=f'furniture::{name}::headboard', location=(x, y - depth * 0.42, frame_h + headboard_h / 2), dimensions=(width * 0.94, depth * 0.12, headboard_h), mat=wood_mat)
+    _add_box(name=f'furniture::{name}::pillow_l', location=(x - width * 0.18, y - depth * 0.24, frame_h + mattress_h + pillow_h / 2), dimensions=(width * 0.26, depth * 0.14, pillow_h), mat=light_mat)
+    _add_box(name=f'furniture::{name}::pillow_r', location=(x + width * 0.18, y - depth * 0.24, frame_h + mattress_h + pillow_h / 2), dimensions=(width * 0.26, depth * 0.14, pillow_h), mat=light_mat)
+
+
+def add_furniture_cabinet(position: list[float], size: list[float], wood_mat: bpy.types.Material, dark_mat: bpy.types.Material, name: str) -> None:
+    x = position[0] if len(position) > 0 else 0.0
+    y = position[1] if len(position) > 1 else 0.0
+    width = max(0.45, size[0] if len(size) > 0 else 1.0)
+    depth = max(0.3, size[1] if len(size) > 1 else 0.45)
+    height = max(1.2, size[2] if len(size) > 2 else 1.8)
+    _add_box(name=f'furniture::{name}::body', location=(x, y, height / 2), dimensions=(width, depth, height), mat=wood_mat)
+    _add_box(name=f'furniture::{name}::top', location=(x, y, height - 0.03), dimensions=(width * 0.98, depth * 0.92, 0.06), mat=dark_mat)
 
 
 def add_lights_and_camera(width: float, depth: float) -> None:
@@ -363,7 +496,10 @@ def build_scene(payload: dict) -> None:
 
     wall_mat = make_material('Wall', (0.94, 0.94, 0.9, 1.0))
     floor_mat = make_material('Floor', (0.73, 0.62, 0.48, 1.0))
-    furniture_mat = make_material('Furniture', (0.75, 0.75, 0.75, 1.0))
+    furniture_wood_mat = make_material('FurnitureWood', (0.58, 0.41, 0.25, 1.0))
+    furniture_fabric_mat = make_material('FurnitureFabric', (0.86, 0.84, 0.8, 1.0))
+    furniture_light_mat = make_material('FurnitureLight', (0.95, 0.94, 0.92, 1.0))
+    furniture_dark_mat = make_material('FurnitureDark', (0.24, 0.22, 0.2, 1.0))
 
     add_floor(width, depth, floor_mat)
 
@@ -380,7 +516,20 @@ def build_scene(payload: dict) -> None:
         pos = item.get('position', [0, 0])
         size = item.get('size_m', [1, 1, 0.8])
         scaled_pos = [pos[0] / pixels_per_meter, pos[1] / pixels_per_meter]
-        add_furniture_placeholder(scaled_pos, size, furniture_mat, item.get('name', item.get('id', 'item')))
+        kind = _infer_furniture_kind(item)
+        name = item.get('name', item.get('id', 'item'))
+        if kind in {'bed'}:
+            add_furniture_bed(scaled_pos, size, furniture_wood_mat, furniture_fabric_mat, furniture_light_mat, name)
+        elif kind in {'sofa'}:
+            add_furniture_sofa(scaled_pos, size, furniture_fabric_mat, furniture_dark_mat, name)
+        elif kind in {'dining_table', 'table', 'coffee_table', 'desk', 'side_table'}:
+            add_furniture_table(scaled_pos, size, furniture_wood_mat, furniture_dark_mat, name)
+        elif kind in {'chair', 'stool'}:
+            add_furniture_chair(scaled_pos, size, furniture_wood_mat, furniture_fabric_mat, name)
+        elif kind in {'nightstand', 'wardrobe', 'cabinet', 'console', 'bookshelf', 'counter', 'appliance'}:
+            add_furniture_cabinet(scaled_pos, size, furniture_wood_mat, furniture_dark_mat, name)
+        else:
+            add_furniture_generic(scaled_pos, size, furniture_dark_mat, name)
 
     add_lights_and_camera(width, depth)
 

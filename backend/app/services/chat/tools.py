@@ -43,6 +43,34 @@ def _find_room(schema: LayoutSchema, room_ref: str) -> Room | None:
     return None
 
 
+def _infer_furniture_kind(name: str, explicit_kind: str | None = None) -> str:
+    kind = (explicit_kind or '').strip().lower()
+    if kind:
+        return kind
+    label = (name or '').strip().lower()
+    if 'sofa' in label or 'couch' in label:
+        return 'sofa'
+    if 'bed' in label:
+        return 'bed'
+    if 'coffee' in label and 'table' in label:
+        return 'coffee_table'
+    if 'dining' in label and 'table' in label:
+        return 'dining_table'
+    if 'nightstand' in label or 'bedside' in label:
+        return 'nightstand'
+    if 'wardrobe' in label or 'closet' in label:
+        return 'wardrobe'
+    if 'desk' in label:
+        return 'desk'
+    if 'chair' in label:
+        return 'chair'
+    if 'stool' in label:
+        return 'stool'
+    if 'cabinet' in label or 'console' in label or 'tv' in label:
+        return 'console'
+    return 'generic'
+
+
 def _list_rooms(ctx: ToolContext, _args: dict[str, Any]) -> str:
     if not ctx.schema.rooms:
         return 'No rooms in this layout yet.'
@@ -67,6 +95,7 @@ def _add_furniture(ctx: ToolContext, args: dict[str, Any]) -> str:
         return f'Room {args.get("room")!r} not found. Call list_rooms first.'
 
     name = args.get('name') or args.get('type') or 'item'
+    kind = _infer_furniture_kind(name, args.get('kind'))
     size = args.get('size_m') or [1.0, 1.0, 0.8]
     if len(size) != 3:
         return 'size_m must be [width, depth, height] in meters.'
@@ -83,6 +112,7 @@ def _add_furniture(ctx: ToolContext, args: dict[str, Any]) -> str:
     item = Furniture(
         id=f'fur_{uuid.uuid4().hex[:8]}',
         name=name,
+        kind=kind,
         room_id=room.id,
         position=list(pos),
         size_m=[float(v) for v in size],
@@ -229,6 +259,7 @@ def build_tools(mcp_enabled: bool) -> list[Tool]:
                     'properties': {
                         'room': {'type': 'string', 'description': 'Room id or name.'},
                         'name': {'type': 'string'},
+                        'kind': {'type': 'string', 'description': 'Furniture kind such as sofa, bed, chair, desk, table.'},
                         'size_m': {
                             'type': 'array',
                             'items': {'type': 'number'},

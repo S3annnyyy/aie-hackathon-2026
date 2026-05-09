@@ -13,7 +13,6 @@ import {
   getLayout,
   getLayouts,
   getProject,
-  modelUrl,
   patchSchema,
   regenerateExtraction,
   toAssetUrl,
@@ -22,6 +21,12 @@ import {
   type LayoutSummary,
   type ProjectSummary,
 } from './lib/api'
+
+function cacheBust(url: string | null | undefined) {
+  if (!url) return null
+  const joiner = url.includes('?') ? '&' : '?'
+  return `${url}${joiner}v=${Date.now()}`
+}
 
 export default function App() {
   const chatRef = useRef<ChatPanelHandle>(null)
@@ -44,6 +49,7 @@ export default function App() {
     setLayouts(ls)
     if (!selectedLayoutId && ls.length > 0) {
       setSelectedLayoutId(ls[0].id)
+      setGlbUrl(cacheBust(toAssetUrl(ls[0].glb_url)))
     }
   }
 
@@ -66,10 +72,10 @@ export default function App() {
     try {
       const layout = await getLayout(layoutId)
       setLayouts((prev) => prev.map((item) => (item.id === layoutId ? layout : item)))
-      setGlbUrl(toAssetUrl(layout.glb_url))
+      setGlbUrl(cacheBust(toAssetUrl(layout.glb_url)))
     } catch (error) {
       setNotice(`Failed to load selected layout: ${String(error)}`)
-      setGlbUrl(null)
+      setGlbUrl(cacheBust(null))
     }
   }
 
@@ -107,7 +113,7 @@ export default function App() {
     setBusy(true)
     try {
       const url = await generateGlb(selectedLayoutId)
-      setGlbUrl(url || modelUrl(selectedLayoutId))
+      setGlbUrl(cacheBust(url))
       const latest = await getLayout(selectedLayoutId)
       setLayouts((prev) => prev.map((item) => (item.id === latest.id ? latest : item)))
       setNotice('GLB generated.')
@@ -136,7 +142,7 @@ export default function App() {
   const onGlbReady = async (modelPath: string) => {
     const base = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4190'
     const absolute = modelPath.startsWith('http') ? modelPath : `${base}${modelPath}`
-    setGlbUrl(`${absolute}?v=${Date.now()}`)
+    setGlbUrl(cacheBust(absolute))
     if (selectedLayoutId) {
       try {
         const latest = await getLayout(selectedLayoutId)

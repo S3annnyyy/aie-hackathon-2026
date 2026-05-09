@@ -22,6 +22,15 @@ export type Wall = {
   height_m: number
 }
 
+export type Furniture = {
+  id: string
+  name: string
+  kind: string
+  room_id?: string | null
+  position: number[]
+  size_m: number[]
+}
+
 export type LayoutSchema = {
   project_id: string
   layout_id: string
@@ -35,7 +44,7 @@ export type LayoutSchema = {
   walls: Wall[]
   doors: unknown[]
   windows: unknown[]
-  furniture: unknown[]
+  furniture: Furniture[]
   todos: string[]
 }
 
