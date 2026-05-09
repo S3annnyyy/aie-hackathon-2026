@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 
-from app.models.schema import LayoutMetadata, LayoutSchema, Room, Wall
+from app.models.schema import LayoutMetadata, LayoutSchema, Opening, Room, Wall
 from app.services.image_vectorizer import VectorizedData
 from app.services.llm_layout_metadata_extractor import LlmRoomHint
 
@@ -260,6 +260,33 @@ class SchemaGenerator:
     ) -> list[tuple[tuple[float, float], tuple[float, float]]]:
         return self._merge_collinear(lines)[:32]
 
+    def _windows_from_lines(
+        self,
+        lines: list[tuple[tuple[float, float], tuple[float, float]]],
+        *,
+        pixels_per_meter: float = 100.0,
+    ) -> list[Opening]:
+        merged = self._merge_collinear(lines, coord_tol=16.0, gap_tol=18.0, min_length=28.0)[:24]
+        windows: list[Opening] = []
+        seen: set[tuple[tuple[int, int], tuple[int, int]]] = set()
+        for idx, (start, end) in enumerate(merged, start=1):
+            key = self._canonical_key(start, end, grid=10.0)
+            if key in seen:
+                continue
+            seen.add(key)
+            length_px = self._segment_length(start, end)
+            if length_px < 28.0:
+                continue
+            windows.append(
+                Opening(
+                    id=f'window_{len(windows) + 1}',
+                    center=[(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0],
+                    width_m=max(0.65, min(3.6, length_px / pixels_per_meter)),
+                    height_m=1.15,
+                )
+            )
+        return windows
+
     def _merge_outline_and_partitions(
         self,
         outline: list[tuple[tuple[float, float], tuple[float, float]]],
@@ -332,6 +359,8 @@ class SchemaGenerator:
             start, end = seg
             walls.append(Wall(id=f'wall_{idx}', start=[start[0], start[1]], end=[end[0], end[1]]))
 
+        windows = self._windows_from_lines(vectorized.window_segments)
+
         return LayoutSchema(
             project_id=project_id,
             layout_id=layout_id,
@@ -343,7 +372,7 @@ class SchemaGenerator:
             rooms=rooms,
             walls=walls,
             doors=[],
-            windows=[],
+            windows=windows,
             furniture=[],
             todos=vectorized.todos,
         )

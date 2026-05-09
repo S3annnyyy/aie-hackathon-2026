@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 
 import { ChatPanel, type ChatPanelHandle } from './features/chat/ChatPanel'
 import { InspirePanel } from './features/chat/InspirePanel'
@@ -10,6 +10,8 @@ import {
   exportDxf,
   fixSchema,
   generateGlb,
+  geocodeAddress,
+  getEnvironment,
   getLayout,
   getLayouts,
   getProject,
@@ -18,10 +20,17 @@ import {
   regenerateExtraction,
   toAssetUrl,
   uploadPdf,
+  type EnvironmentData,
+  type GeocodeResult,
   type LayoutSchema,
   type LayoutSummary,
   type ProjectSummary,
 } from './lib/api'
+
+function windLabel(deg: number): string {
+  const dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
+  return dirs[Math.round(deg / 22.5) % 16]
+}
 
 export default function App() {
   const chatRef = useRef<ChatPanelHandle>(null)
@@ -31,6 +40,11 @@ export default function App() {
   const [selectedLayoutId, setSelectedLayoutId] = useState<string | null>(null)
   const [glbUrl, setGlbUrl] = useState<string | null>(null)
   const [notice, setNotice] = useState<string>('Upload a brochure PDF to start.')
+  const [locationQuery, setLocationQuery] = useState('')
+  const [geocodeResults, setGeocodeResults] = useState<GeocodeResult[]>([])
+  const [environment, setEnvironment] = useState<EnvironmentData | null>(null)
+  const [envLoading, setEnvLoading] = useState(false)
+  const geocodeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const selectedLayout = useMemo(
     () => layouts.find((layout) => layout.id === selectedLayoutId) ?? null,
@@ -161,6 +175,35 @@ export default function App() {
     }
   }
 
+  const onLocationInput = useCallback((value: string) => {
+    setLocationQuery(value)
+    setGeocodeResults([])
+    if (geocodeTimer.current) clearTimeout(geocodeTimer.current)
+    if (value.trim().length < 3) return
+    geocodeTimer.current = setTimeout(async () => {
+      try {
+        const results = await geocodeAddress(value)
+        setGeocodeResults(results)
+      } catch {
+        // silently ignore
+      }
+    }, 500)
+  }, [])
+
+  const onSelectLocation = useCallback(async (result: GeocodeResult) => {
+    setLocationQuery(result.display_name.split(',').slice(0, 2).join(','))
+    setGeocodeResults([])
+    setEnvLoading(true)
+    try {
+      const env = await getEnvironment(result.lat, result.lon)
+      setEnvironment(env)
+    } catch (err) {
+      setNotice(`Environment fetch failed: ${String(err)}`)
+    } finally {
+      setEnvLoading(false)
+    }
+  }, [])
+
   return (
     <div className="page">
       <h1>PDF to 3D HDB Interior MVP</h1>
@@ -177,6 +220,45 @@ export default function App() {
               <div className="muted">Status: {project.status}</div>
             </div>
           ) : null}
+
+          <div className="card">
+            <h3>Location</h3>
+            <p className="muted" style={{ marginBottom: '0.5rem' }}>
+              Search an address to load real-time sun &amp; wind data.
+            </p>
+            <div style={{ position: 'relative' }}>
+              <input
+                type="text"
+                placeholder="e.g. Ang Mo Kio, Singapore"
+                value={locationQuery}
+                onChange={(e) => onLocationInput(e.target.value)}
+                style={{ width: '100%', boxSizing: 'border-box', padding: '0.4rem 0.6rem', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'inherit' }}
+              />
+              {geocodeResults.length > 0 && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, marginTop: 2, boxShadow: '0 4px 12px rgba(0,0,0,0.25)' }}>
+                  {geocodeResults.map((r, i) => (
+                    <div
+                      key={i}
+                      onClick={() => onSelectLocation(r)}
+                      style={{ padding: '0.45rem 0.7rem', cursor: 'pointer', fontSize: 12, borderBottom: i < geocodeResults.length - 1 ? '1px solid var(--border)' : 'none' }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--hover, #333)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = '')}
+                    >
+                      {r.display_name}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            {envLoading && <div className="muted" style={{ marginTop: '0.5rem' }}>Fetching weather…</div>}
+            {environment && !envLoading && (
+              <div style={{ marginTop: '0.5rem', fontSize: 12 }}>
+                <div className="muted">Wind: {environment.wind_speed.toFixed(1)} km/h from {windLabel(environment.wind_direction)}</div>
+                <div className="muted">Sun: {environment.solar_elevation.toFixed(0)}° elevation, {environment.solar_azimuth.toFixed(0)}° azimuth</div>
+                <div className="muted" style={{ fontSize: 10 }}>{environment.timestamp.replace('T', ' ')}</div>
+              </div>
+            )}
+          </div>
         </div>
 
         <div>
@@ -239,7 +321,7 @@ export default function App() {
               <p className="muted">Select a layout to inspect extracted metadata.</p>
             )}
           </div>
-          <Viewer3D glbUrl={glbUrl} schema={selectedLayout?.schema ?? null} />
+          <Viewer3D glbUrl={glbUrl} schema={selectedLayout?.schema ?? null} environment={environment} />
         </div>
 
         <div>

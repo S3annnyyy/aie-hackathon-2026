@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from uuid import UUID
 
@@ -17,6 +17,7 @@ from app.models.schema import (
     SchemaPatchRequest,
     UploadResponse,
 )
+from app.services.weather_service import geocode as _geocode, get_environment as _get_environment
 
 router = APIRouter(prefix='/api')
 
@@ -169,3 +170,39 @@ async def get_layout_glb(request: Request, layout_id: UUID) -> FileResponse:
     if not path or not path.exists():
         raise HTTPException(status_code=404, detail='GLB not found.')
     return FileResponse(path, media_type='model/gltf-binary', filename=f'{layout_id}.glb')
+
+
+@router.get('/geocode')
+async def geocode_endpoint(q: str = Query(..., min_length=2)) -> list[dict]:
+    try:
+        results = await _geocode(q)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f'Geocoding failed: {exc}') from exc
+    return [{'lat': r.lat, 'lon': r.lon, 'display_name': r.display_name} for r in results]
+
+
+@router.get('/environment')
+async def environment_endpoint(lat: float = Query(...), lon: float = Query(...)) -> dict:
+    try:
+        env = await _get_environment(lat, lon)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f'Weather fetch failed: {exc}') from exc
+    return {
+        'lat': env.lat,
+        'lon': env.lon,
+        'wind_speed': env.wind_speed,
+        'wind_direction': env.wind_direction,
+        'solar_azimuth': env.solar_azimuth,
+        'solar_elevation': env.solar_elevation,
+        'timestamp': env.timestamp,
+        'timezone': env.timezone,
+        'utc_offset_seconds': env.utc_offset_seconds,
+        'solar_samples': [
+            {
+                'time': sample.time,
+                'solar_azimuth': sample.solar_azimuth,
+                'solar_elevation': sample.solar_elevation,
+            }
+            for sample in env.solar_samples
+        ],
+    }

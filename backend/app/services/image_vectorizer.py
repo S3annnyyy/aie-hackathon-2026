@@ -9,6 +9,7 @@ import numpy as np
 class VectorizedData:
     def __init__(self) -> None:
         self.wall_segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
+        self.window_segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
         self.room_polygons: list[list[list[float]]] = []
         self.todos: list[str] = []
 
@@ -33,6 +34,65 @@ class ImageVectorizer:
                 cv2.floodFill(work, flood_mask, (x, y), 0)
         return work
 
+    @staticmethod
+    def _has_nearby_dark_band(
+        dark_mask: np.ndarray,
+        *,
+        x: int,
+        y: int,
+        w: int,
+        h: int,
+        is_horizontal: bool,
+    ) -> bool:
+        img_h, img_w = dark_mask.shape
+        margin = max(4, min(18, max(w, h) // 6))
+        if is_horizontal:
+            above = dark_mask[max(0, y - margin):y, max(0, x - 2):min(img_w, x + w + 2)]
+            below = dark_mask[min(img_h, y + h):min(img_h, y + h + margin), max(0, x - 2):min(img_w, x + w + 2)]
+            bands = [above, below]
+        else:
+            left = dark_mask[max(0, y - 2):min(img_h, y + h + 2), max(0, x - margin):x]
+            right = dark_mask[max(0, y - 2):min(img_h, y + h + 2), min(img_w, x + w):min(img_w, x + w + margin)]
+            bands = [left, right]
+
+        for band in bands:
+            if band.size and float(np.count_nonzero(band)) / float(band.size) > 0.08:
+                return True
+        return False
+
+    def _detect_window_segments(self, image: np.ndarray, dark_mask: np.ndarray) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+        h, w = image.shape
+        bright = cv2.inRange(image, 178, 255)
+        segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
+
+        horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(24, w // 55), 3))
+        vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, max(24, h // 55)))
+        min_len = max(28, int(min(w, h) * 0.035))
+
+        for mask, is_horizontal in (
+            (cv2.morphologyEx(bright, cv2.MORPH_OPEN, horizontal_kernel), True),
+            (cv2.morphologyEx(bright, cv2.MORPH_OPEN, vertical_kernel), False),
+        ):
+            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for contour in contours:
+                x, y, bw, bh = cv2.boundingRect(contour)
+                if is_horizontal:
+                    if bw < min_len or bh < 2 or bh > max(26, h * 0.035) or bw < bh * 3.5:
+                        continue
+                    if not self._has_nearby_dark_band(dark_mask, x=x, y=y, w=bw, h=bh, is_horizontal=True):
+                        continue
+                    cy = float(y + bh / 2.0)
+                    segments.append(((float(x), cy), (float(x + bw), cy)))
+                else:
+                    if bh < min_len or bw < 2 or bw > max(26, w * 0.035) or bh < bw * 3.5:
+                        continue
+                    if not self._has_nearby_dark_band(dark_mask, x=x, y=y, w=bw, h=bh, is_horizontal=False):
+                        continue
+                    cx = float(x + bw / 2.0)
+                    segments.append(((cx, float(y)), (cx, float(y + bh))))
+
+        return segments
+
     def process(self, crop_path: Path) -> VectorizedData:
         output = VectorizedData()
         image = cv2.imread(str(crop_path), cv2.IMREAD_GRAYSCALE)
@@ -45,6 +105,7 @@ class ImageVectorizer:
         # Prefer heavy structural lines. Adaptive thresholding catches labels,
         # fixture outlines, doors, and furniture, which makes the 3D model noisy.
         dark_walls = cv2.inRange(image, 0, 105)
+        output.window_segments = self._detect_window_segments(image, dark_walls)
         structural_mask = cv2.morphologyEx(
             dark_walls,
             cv2.MORPH_OPEN,

@@ -94,6 +94,74 @@ textarea {
   overflow: hidden;
 }
 
+.scene-factor-label {
+  min-width: 54px;
+  padding: 0.28rem 0.45rem;
+  border: 1px solid rgba(15, 118, 110, 0.3);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.84);
+  box-shadow: 0 8px 24px rgba(17, 24, 39, 0.14);
+  color: var(--text);
+  font-size: 0.72rem;
+  line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.scene-factor-label strong,
+.scene-factor-label span {
+  display: block;
+}
+
+.sun-time-control {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.75rem;
+}
+
+.sun-time-control .muted {
+  display: block;
+  margin-top: 0.15rem;
+}
+
+.sun-sim-toolbar {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.sun-sim-toolbar button {
+  border-color: #f59e0b;
+  background: #fff7d6;
+  color: #8a4b00;
+  font-weight: 700;
+}
+
+.sun-sim-toolbar input {
+  accent-color: #f59e0b;
+}
+
+.sun-time-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.sun-time-buttons button {
+  padding: 0.35rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+}
+
+.sun-time-buttons button.active {
+  border-color: #f59e0b;
+  background: #fff7d6;
+  color: #8a4b00;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.16);
+}
+
 .badge {
   display: inline-block;
   padding: 0.18rem 0.45rem;
@@ -105,6 +173,10 @@ textarea {
 
 @media (max-width: 1120px) {
   .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sun-sim-toolbar {
     grid-template-columns: 1fr;
   }
 }

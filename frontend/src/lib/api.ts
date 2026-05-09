@@ -22,6 +22,14 @@ export type Wall = {
   height_m: number
 }
 
+export type Opening = {
+  id: string
+  wall_id?: string | null
+  center: number[]
+  width_m: number
+  height_m: number
+}
+
 export type LayoutSchema = {
   project_id: string
   layout_id: string
@@ -33,8 +41,8 @@ export type LayoutSchema = {
   scale: ScaleInfo
   rooms: Room[]
   walls: Wall[]
-  doors: unknown[]
-  windows: unknown[]
+  doors: Opening[]
+  windows: Opening[]
   furniture: unknown[]
   todos: string[]
 }
@@ -162,6 +170,43 @@ export function toAssetUrl(url: string | null | undefined): string | null {
 
 export function modelUrl(layoutId: string): string {
   return `${API_BASE}/api/layouts/${layoutId}/model.glb`
+}
+
+export type GeocodeResult = {
+  lat: number
+  lon: number
+  display_name: string
+}
+
+export type SolarSample = {
+  time: string
+  solar_azimuth: number
+  solar_elevation: number
+}
+
+export type EnvironmentData = {
+  lat: number
+  lon: number
+  wind_speed: number
+  wind_direction: number
+  solar_azimuth: number
+  solar_elevation: number
+  timestamp: string
+  timezone?: string
+  utc_offset_seconds?: number
+  solar_samples?: SolarSample[]
+}
+
+export async function geocodeAddress(query: string): Promise<GeocodeResult[]> {
+  const res = await fetch(`${API_BASE}/api/geocode?q=${encodeURIComponent(query)}`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function getEnvironment(lat: number, lon: number): Promise<EnvironmentData> {
+  const res = await fetch(`${API_BASE}/api/environment?lat=${lat}&lon=${lon}`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
 }
 
 export type InspirationPayload = {

@@ -176,7 +176,7 @@ class ProjectService:
                 clean_crop_path = self.cropper.sanitize_crop_for_geometry(crop_path, project_dir / 'crops_clean')
                 vectorized = self.vectorizer.process(crop_path)
                 logger.info(
-                    'upload.crop_vectorized project_id=%s source_page=%d crop_idx=%d crop=%s clean_crop=%s rooms=%d walls=%d todos=%d',
+                    'upload.crop_vectorized project_id=%s source_page=%d crop_idx=%d crop=%s clean_crop=%s rooms=%d walls=%d windows=%d todos=%d',
                     project_id,
                     page_num,
                     crop_idx,
@@ -184,6 +184,7 @@ class ProjectService:
                     clean_crop_path,
                     len(vectorized.room_polygons),
                     len(vectorized.wall_segments),
+                    len(vectorized.window_segments),
                     len(vectorized.todos),
                 )
                 temp_schema = self.schema_generator.build(
@@ -424,12 +425,13 @@ class ProjectService:
         clean_crop_path = self.cropper.sanitize_crop_for_geometry(crop_path, self.storage.project_dir(layout.project_id) / 'crops_clean')
         vectorized = self.vectorizer.process(crop_path)
         logger.info(
-            'reextract.vectorized layout_id=%s crop=%s clean_crop=%s rooms=%d walls=%d todos=%d',
+            'reextract.vectorized layout_id=%s crop=%s clean_crop=%s rooms=%d walls=%d windows=%d todos=%d',
             layout_id,
             crop_path,
             clean_crop_path,
             len(vectorized.room_polygons),
             len(vectorized.wall_segments),
+            len(vectorized.window_segments),
             len(vectorized.todos),
         )
         regenerated = self.schema_generator.build(
@@ -447,6 +449,7 @@ class ProjectService:
                 'floor_area_sqm': regenerated.floor_area_sqm,
                 'rooms': regenerated.rooms,
                 'walls': regenerated.walls,
+                'windows': regenerated.windows,
                 'todos': regenerated.todos,
             }
         )
@@ -531,6 +534,7 @@ class ProjectService:
                     update={
                         'rooms': regenerated.rooms,
                         'walls': regenerated.walls,
+                        'windows': regenerated.windows,
                         'todos': list(dict.fromkeys(schema.todos + regenerated.todos)),
                     }
                 )
