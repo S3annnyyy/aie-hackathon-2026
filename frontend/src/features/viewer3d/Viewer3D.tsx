@@ -77,9 +77,12 @@ const SUN_MODEL_CLEARANCE = 2.4
 const SUN_VISUAL_ORBIT_MULTIPLIER = 0.92
 const SUN_LIGHT_ORBIT_MULTIPLIER = 1.65
 const WINDOW_SILL_HEIGHT = 0.88
-const OVERVIEW_ROTATION_SPEED = 0.12
+const OVERVIEW_ROTATION_SPEED = 0.045
+const OVERVIEW_CURSOR_ROTATE_SPEED = 0.36
+const OVERVIEW_CURSOR_DEADZONE = 0.08
 const INITIAL_OVERVIEW_ANGLE = Math.PI / 4
 const OVERVIEW_RADIUS_MULTIPLIER = 0.95 * Math.SQRT2
+const WALKTHROUGH_CAMERA_ZOOM = 0.94
 const WALL_COLLISION_BUFFER = 0.22
 const WALL_GREY = '#c9c7c1'
 const FLOOR_TONE = '#786d60'
@@ -102,6 +105,20 @@ type WallCollisionSegment = {
   maxAxis: number
   coord: number
   halfThickness: number
+}
+
+type WindowPlacement = {
+  id: string
+  localCenter: number
+  width: number
+  height: number
+}
+
+type WallExtents = {
+  minX: number
+  maxX: number
+  minZ: number
+  maxZ: number
 }
 
 class ViewerErrorBoundary extends Component<ViewerErrorBoundaryProps, ViewerErrorBoundaryState> {
@@ -626,6 +643,74 @@ function collidesWithWalls(point: WorldPoint, walls: WallCollisionSegment[]) {
   return walls.some((wall) => pointHitsWall(point, wall))
 }
 
+function computeWallExtents(walls: Wall[], ppm: number): WallExtents | null {
+  if (!walls.length) return null
+  const points: WorldPoint[] = []
+  for (const wall of walls) {
+    points.push(toWorldPoint(wall.start, ppm))
+    points.push(toWorldPoint(wall.end, ppm))
+  }
+  return {
+    minX: Math.min(...points.map((point) => point.x)),
+    maxX: Math.max(...points.map((point) => point.x)),
+    minZ: Math.min(...points.map((point) => point.z)),
+    maxZ: Math.max(...points.map((point) => point.z)),
+  }
+}
+
+function templateWindowsForFourRoom(walls: Wall[]): Opening[] {
+  const wallIds = new Set(walls.map((wall) => wall.id))
+  const presets: Opening[] = [
+    { id: 'template_window_1', wall_id: 'wall_window_living', center: [327.5, 220.0], width_m: 3.51, height_m: 1.2 },
+    { id: 'template_window_2', wall_id: 'wall_window_bedroom_left', center: [722.0, 49.25], width_m: 2.28, height_m: 1.2 },
+    { id: 'template_window_3', wall_id: 'wall_window_bedroom_middle', center: [1158.5, 49.25], width_m: 1.67, height_m: 1.2 },
+    { id: 'template_window_4', wall_id: 'wall_window_main_bedroom', center: [1493.5, 49.25], width_m: 3.75, height_m: 1.2 },
+  ]
+
+  return presets.filter((opening) => typeof opening.wall_id === 'string' && wallIds.has(opening.wall_id))
+}
+
+function templateWindowWallsForFourRoom(walls: Wall[]): Wall[] {
+  const wallIds = new Set(walls.map((wall) => wall.id))
+  const presets: Wall[] = [
+    { id: 'wall_window_living', start: [152.0, 220.0], end: [503.0, 220.0], thickness_m: 0.12, height_m: 2.8 },
+    { id: 'wall_window_bedroom_left', start: [608.0, 49.25], end: [836.0, 49.25], thickness_m: 0.12, height_m: 2.8 },
+    { id: 'wall_window_bedroom_middle', start: [1075.0, 49.25], end: [1242.0, 49.25], thickness_m: 0.12, height_m: 2.8 },
+    { id: 'wall_window_main_bedroom', start: [1306.0, 49.25], end: [1681.0, 49.25], thickness_m: 0.12, height_m: 2.8 },
+  ]
+
+  return presets.filter((wall) => !wallIds.has(wall.id))
+}
+
+function dedupeOpeningsForViewer(openings: Opening[]) {
+  const seen = new Set<string>()
+  const deduped: Opening[] = []
+  for (const opening of openings) {
+    const centerX = Number.isFinite(opening.center?.[0] as number) ? Number(opening.center[0]) : 0
+    const centerY = Number.isFinite(opening.center?.[1] as number) ? Number(opening.center[1]) : 0
+    const key = `${opening.wall_id ?? 'none'}:${Math.round(centerX / 8)}:${Math.round(centerY / 8)}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    deduped.push(opening)
+  }
+  return deduped
+}
+
+function isExteriorWall(wall: Wall, extents: WallExtents, ppm: number) {
+  const start = toWorldPoint(wall.start, ppm)
+  const end = toWorldPoint(wall.end, ppm)
+  const horizontal = Math.abs(end.x - start.x) >= Math.abs(end.z - start.z)
+  const tolerance = Math.max(0.12, wall.thickness_m * 1.5, 0.35)
+
+  if (horizontal) {
+    const avgZ = (start.z + end.z) / 2
+    return Math.abs(avgZ - extents.minZ) <= tolerance || Math.abs(avgZ - extents.maxZ) <= tolerance
+  }
+
+  const avgX = (start.x + end.x) / 2
+  return Math.abs(avgX - extents.minX) <= tolerance || Math.abs(avgX - extents.maxX) <= tolerance
+}
+
 function styleMaterialForInterior(material: THREE.Material, kind: 'floor' | 'wall' | 'other') {
   const next = material.clone() as THREE.Material & Record<string, unknown>
   const typed = next as THREE.Material & {
@@ -678,8 +763,64 @@ function styleMaterialForInterior(material: THREE.Material, kind: 'floor' | 'wal
   return next
 }
 
-function WallOverlay({ walls, ppm }: { walls: Wall[]; ppm: number }) {
+function WallOverlay({ walls, windows, ppm }: { walls: Wall[]; windows: Opening[]; ppm: number }) {
   if (!walls.length) return null
+
+  const openingsByWall = useMemo(() => {
+    const wallById = new Map(walls.map((wall) => [wall.id, wall]))
+    const placements = new Map<string, WindowPlacement[]>()
+    const extents = computeWallExtents(walls, ppm)
+
+    if (!extents) {
+      return placements
+    }
+
+    for (const opening of windows) {
+      let wall = opening.wall_id ? wallById.get(opening.wall_id) ?? null : null
+      if (!wall) {
+        const center = toWorldPoint(opening.center, ppm)
+        let bestWall: Wall | null = null
+        let bestDistance = Number.POSITIVE_INFINITY
+        for (const candidate of walls) {
+          const start = toWorldPoint(candidate.start, ppm)
+          const end = toWorldPoint(candidate.end, ppm)
+          const distance = distancePointToSegmentSquared(center, start, end)
+          if (distance < bestDistance) {
+            bestDistance = distance
+            bestWall = candidate
+          }
+        }
+        wall = bestWall
+      }
+
+      if (!wall || (!wall.id.startsWith('wall_window_') && !isExteriorWall(wall, extents, ppm))) continue
+
+      const start = toWorldPoint(wall.start, ppm)
+      const end = toWorldPoint(wall.end, ppm)
+      const wallCenter = new THREE.Vector3((start.x + end.x) / 2, 0, (start.z + end.z) / 2)
+      const wallDir = new THREE.Vector3(end.x - start.x, 0, end.z - start.z)
+      const wallLength = Math.max(wallDir.length(), 1e-6)
+      wallDir.normalize()
+      const openingCenter = toWorldPoint(opening.center, ppm)
+      const localCenterRaw = new THREE.Vector3(openingCenter.x - wallCenter.x, 0, openingCenter.z - wallCenter.z).dot(wallDir)
+      const maxCenter = Math.max(0, wallLength / 2 - Math.max(0.18, opening.width_m / 2) - 0.05)
+      const localCenter = clamp(localCenterRaw, -maxCenter, maxCenter)
+      const list = placements.get(wall.id) ?? []
+      list.push({
+        id: opening.id,
+        localCenter,
+        width: Math.max(0.18, opening.width_m),
+        height: Math.max(0.28, Math.min(opening.height_m, 1.35)),
+      })
+      placements.set(wall.id, list)
+    }
+
+    for (const list of placements.values()) {
+      list.sort((a, b) => a.localCenter - b.localCenter)
+    }
+
+    return placements
+  }, [walls, windows, ppm])
 
   return (
     <group>
@@ -692,112 +833,81 @@ function WallOverlay({ walls, ppm }: { walls: Wall[]; ppm: number }) {
         const height = Math.max(2.2, wall.height_m)
         const thickness = Math.max(0.07, wall.thickness_m)
         const angle = Math.atan2(end.z - start.z, end.x - start.x)
+        const openings = openingsByWall.get(wall.id) ?? []
+        const sillHeight = WINDOW_SILL_HEIGHT
+        const topHeight = openings.length
+          ? Math.max(0.22, height - sillHeight - Math.max(...openings.map((opening) => opening.height)))
+          : 0
+        const frameDepth = Math.max(0.01, thickness * 0.08)
+        const frameWidth = Math.min(0.14, Math.max(0.04, thickness * 0.42))
 
         return (
           <group key={wall.id} position={[centerX, FLOOR_HEIGHT, centerZ]} rotation={[0, -angle, 0]}>
-            <mesh castShadow receiveShadow position={[0, height / 2, 0]}>
-              <boxGeometry args={[length, height, thickness]} />
-              <meshStandardMaterial
-                color="#b9b8b3"
-                roughness={0.96}
-                metalness={0}
-                side={THREE.DoubleSide}
-                polygonOffset
-                polygonOffsetFactor={1}
-                polygonOffsetUnits={1}
-              />
-            </mesh>
-          </group>
-        )
-      })}
-    </group>
-  )
-}
-
-function WindowOverlay({ windows, walls, ppm }: { windows: Opening[]; walls: Wall[]; ppm: number }) {
-  if (!windows.length || !walls.length) return null
-
-  const wallById = new Map(walls.map((wall) => [wall.id, wall]))
-
-  const resolveWall = (opening: Opening) => {
-    if (opening.wall_id && wallById.has(opening.wall_id)) {
-      return wallById.get(opening.wall_id) ?? null
-    }
-
-    const center = toWorldPoint(opening.center, ppm)
-    let bestWall: Wall | null = null
-    let bestDistance = Number.POSITIVE_INFINITY
-    for (const wall of walls) {
-      const start = toWorldPoint(wall.start, ppm)
-      const end = toWorldPoint(wall.end, ppm)
-      const distance = distancePointToSegmentSquared(center, start, end)
-      if (distance < bestDistance) {
-        bestDistance = distance
-        bestWall = wall
-      }
-    }
-    return bestWall
-  }
-
-  return (
-    <group>
-      {windows.map((opening) => {
-        const wall = resolveWall(opening)
-        if (!wall) return null
-
-        const start = toWorldPoint(wall.start, ppm)
-        const end = toWorldPoint(wall.end, ppm)
-        const center = toWorldPoint(opening.center, ppm)
-        const angle = Math.atan2(end.z - start.z, end.x - start.x)
-        const width = Math.max(0.18, opening.width_m)
-        const height = Math.max(0.28, opening.height_m)
-        const depth = Math.max(0.03, wall.thickness_m * 0.86)
-        const sillHeight = WINDOW_SILL_HEIGHT
-        const y = FLOOR_HEIGHT + sillHeight + height / 2
-
-        return (
-          <group key={opening.id} position={[center.x, y, center.z]} rotation={[0, -angle, 0]}>
-            <mesh receiveShadow>
-              <boxGeometry args={[width * 1.12, height * 1.12, depth]} />
-              <meshStandardMaterial
-                color="#8b9095"
-                roughness={0.82}
-                metalness={0}
-                side={THREE.DoubleSide}
-                polygonOffset
-                polygonOffsetFactor={2}
-                polygonOffsetUnits={2}
-              />
-            </mesh>
-            <mesh receiveShadow position={[0, 0, 0.001]}>
-              <boxGeometry args={[width * 0.82, height * 0.82, Math.max(0.012, depth * 0.22)]} />
-              <meshPhysicalMaterial
-                color="#d9e3eb"
-                roughness={0.06}
-                metalness={0}
-                transmission={0.75}
-                transparent
-                opacity={0.2}
-                ior={1.45}
-                thickness={0.03}
-                clearcoat={0.55}
-                clearcoatRoughness={0.12}
-                side={THREE.DoubleSide}
-                depthWrite={false}
-              />
-            </mesh>
-            <mesh castShadow receiveShadow position={[0, 0, depth * 0.36]}>
-              <boxGeometry args={[Math.max(0.03, width * 0.05), height * 0.92, depth * 0.16]} />
-              <meshStandardMaterial color="#6f7478" roughness={0.95} metalness={0} side={THREE.DoubleSide} />
-            </mesh>
-            <mesh castShadow receiveShadow position={[0, 0, -depth * 0.36]}>
-              <boxGeometry args={[Math.max(0.03, width * 0.05), height * 0.92, depth * 0.16]} />
-              <meshStandardMaterial color="#6f7478" roughness={0.95} metalness={0} side={THREE.DoubleSide} />
-            </mesh>
-            <mesh castShadow receiveShadow position={[0, 0, 0]}>
-              <boxGeometry args={[width * 1.08, Math.max(0.03, height * 0.05), depth * 0.16]} />
-              <meshStandardMaterial color="#6f7478" roughness={0.95} metalness={0} side={THREE.DoubleSide} />
-            </mesh>
+            {openings.length === 0 ? (
+              <mesh castShadow receiveShadow position={[0, height / 2, 0]}>
+                <boxGeometry args={[length, height, thickness]} />
+                <meshStandardMaterial
+                  color="#b9b8b3"
+                  roughness={0.96}
+                  metalness={0}
+                  side={THREE.DoubleSide}
+                  polygonOffset
+                  polygonOffsetFactor={1}
+                  polygonOffsetUnits={1}
+                />
+              </mesh>
+            ) : (
+              <>
+                <mesh castShadow receiveShadow position={[0, sillHeight / 2, 0]}>
+                  <boxGeometry args={[length, sillHeight, thickness]} />
+                  <meshStandardMaterial
+                    color="#b9b8b3"
+                    roughness={0.96}
+                    metalness={0}
+                    side={THREE.DoubleSide}
+                    polygonOffset
+                    polygonOffsetFactor={1}
+                    polygonOffsetUnits={1}
+                  />
+                </mesh>
+                <mesh castShadow receiveShadow position={[0, sillHeight + Math.max(...openings.map((opening) => opening.height)) + topHeight / 2, 0]}>
+                  <boxGeometry args={[length, topHeight, thickness]} />
+                  <meshStandardMaterial
+                    color="#b9b8b3"
+                    roughness={0.96}
+                    metalness={0}
+                    side={THREE.DoubleSide}
+                    polygonOffset
+                    polygonOffsetFactor={1}
+                    polygonOffsetUnits={1}
+                  />
+                </mesh>
+                {openings.map((opening) => (
+                  <group key={opening.id}>
+                    <mesh castShadow receiveShadow position={[opening.localCenter - opening.width / 2 + frameWidth / 2, sillHeight + opening.height / 2, 0]}>
+                      <boxGeometry args={[frameWidth, opening.height, thickness]} />
+                      <meshStandardMaterial color="#b9b8b3" roughness={0.96} metalness={0} side={THREE.DoubleSide} />
+                    </mesh>
+                    <mesh castShadow receiveShadow position={[opening.localCenter + opening.width / 2 - frameWidth / 2, sillHeight + opening.height / 2, 0]}>
+                      <boxGeometry args={[frameWidth, opening.height, thickness]} />
+                      <meshStandardMaterial color="#b9b8b3" roughness={0.96} metalness={0} side={THREE.DoubleSide} />
+                    </mesh>
+                    <mesh castShadow receiveShadow position={[opening.localCenter, sillHeight + opening.height - frameWidth / 2, 0]}>
+                      <boxGeometry args={[opening.width, frameWidth, frameDepth]} />
+                      <meshStandardMaterial color="#8b9095" roughness={0.88} metalness={0} side={THREE.DoubleSide} />
+                    </mesh>
+                    <mesh castShadow receiveShadow position={[opening.localCenter, sillHeight + frameWidth / 2, 0]}>
+                      <boxGeometry args={[opening.width, frameWidth, frameDepth]} />
+                      <meshStandardMaterial color="#8b9095" roughness={0.88} metalness={0} side={THREE.DoubleSide} />
+                    </mesh>
+                    <mesh castShadow receiveShadow position={[opening.localCenter, sillHeight + opening.height / 2, 0]}>
+                      <boxGeometry args={[opening.width * 0.92, opening.height * 0.88, frameDepth]} />
+                      <meshStandardMaterial color="#d9e8f6" roughness={0.08} metalness={0} transparent opacity={0.48} emissive="#f2f8ff" emissiveIntensity={0.16} side={THREE.DoubleSide} depthWrite={false} />
+                    </mesh>
+                  </group>
+                ))}
+              </>
+            )}
           </group>
         )
       })}
@@ -849,7 +959,15 @@ function resolveMovement(
   return current.clone()
 }
 
-function AlignedGlbModel({ url, anchor }: { url: string; anchor: THREE.Vector3 }) {
+function AlignedGlbModel({
+  url,
+  anchor,
+  hideWallLikeMeshes,
+}: {
+  url: string
+  anchor: THREE.Vector3
+  hideWallLikeMeshes: boolean
+}) {
   const { scene } = useGLTF(url)
   const [offset, setOffset] = useState(() => new THREE.Vector3())
 
@@ -857,11 +975,17 @@ function AlignedGlbModel({ url, anchor }: { url: string; anchor: THREE.Vector3 }
     scene.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh
+
+        const kind = classifyInteriorSurface(mesh)
+        if (hideWallLikeMeshes && kind === 'wall') {
+          mesh.visible = false
+          return
+        }
+
         const isGlassPane = mesh.name.startsWith('window::')
         mesh.castShadow = !isGlassPane
         mesh.receiveShadow = true
 
-        const kind = classifyInteriorSurface(mesh)
         if (kind !== 'other') {
           const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
           mesh.material = materials.map((material) => styleMaterialForInterior(material, kind))
@@ -882,7 +1006,7 @@ function AlignedGlbModel({ url, anchor }: { url: string; anchor: THREE.Vector3 }
     }
     const center = box.getCenter(new THREE.Vector3())
     setOffset(new THREE.Vector3(anchor.x - center.x, 0, anchor.z - center.z))
-  }, [anchor.x, anchor.z, scene, url])
+  }, [anchor.x, anchor.z, hideWallLikeMeshes, scene, url])
 
   return (
     <group position={offset}>
@@ -954,10 +1078,12 @@ function RoomMarker({ room, position, active, hovered, onHoverChange, onSelect }
 function SceneModel({
   glbUrl,
   anchor,
+  hideWallLikeMeshes,
   onLoadError,
 }: {
   glbUrl: string | null
   anchor: THREE.Vector3
+  hideWallLikeMeshes: boolean
   onLoadError: (message: string) => void
 }) {
   if (!glbUrl) return null
@@ -969,7 +1095,7 @@ function SceneModel({
       }}
     >
       <Suspense fallback={null}>
-        <AlignedGlbModel url={glbUrl} anchor={anchor} />
+        <AlignedGlbModel url={glbUrl} anchor={anchor} hideWallLikeMeshes={hideWallLikeMeshes} />
       </Suspense>
     </ViewerErrorBoundary>
   )
@@ -1417,6 +1543,11 @@ function SceneRig({
   }, [camera, mode, onPoseChange, overviewLookAt, overviewPosition, bounds])
 
   useEffect(() => {
+    camera.zoom = mode === 'walkthrough' ? WALKTHROUGH_CAMERA_ZOOM : 1
+    camera.updateProjectionMatrix()
+  }, [camera, mode])
+
+  useEffect(() => {
     if (!transition) return
     camera.position.copy(transition.fromPosition)
     currentTarget.current = transition.fromLookAt.clone()
@@ -1456,6 +1587,11 @@ function SceneRig({
         pointer.x <= canvasRect.right &&
         pointer.y >= canvasRect.top &&
         pointer.y <= canvasRect.bottom
+      const pointerOverHud = Boolean(
+        pointer &&
+          typeof document.elementFromPoint === 'function' &&
+          document.elementFromPoint(pointer.x, pointer.y)?.closest('.hud-shell'),
+      )
 
       if (!pointerInsideCanvas) {
         overviewPause.current = false
@@ -1479,6 +1615,15 @@ function SceneRig({
       if (!overviewPause.current) {
         overviewAngle.current += delta * OVERVIEW_ROTATION_SPEED
       }
+
+      if (pointerInsideCanvas && pointer && !pointerOverHud) {
+        const normalizedX = (pointer.x - canvasRect.left) / Math.max(1, canvasRect.width)
+        const cursorOffset = (normalizedX - 0.5) * 2
+        if (Math.abs(cursorOffset) > OVERVIEW_CURSOR_DEADZONE) {
+          overviewAngle.current += cursorOffset * delta * OVERVIEW_CURSOR_ROTATE_SPEED
+        }
+      }
+
       const orbit = getOverviewOrbitPose(bounds, overviewAngle.current)
       camera.position.copy(orbit.position)
       currentTarget.current.copy(overviewLookAt)
@@ -1551,11 +1696,25 @@ export function Viewer3D({ glbUrl, schema, environment }: Props) {
   })
 
   const ppm = schema?.scale.pixels_per_meter ?? 100
+  const isFourRoom = String(schema?.flat_type ?? '').toLowerCase().includes('4-room')
+  const viewerWalls = useMemo(() => {
+    const schemaWalls = schema?.walls ?? []
+    return isFourRoom ? [...schemaWalls, ...templateWindowWallsForFourRoom(schemaWalls)] : schemaWalls
+  }, [isFourRoom, schema?.walls])
   const bounds = useMemo(() => computeBounds(schema, ppm), [schema, ppm])
-  const wallSegments = useMemo(() => buildWallCollisionSegments(schema?.walls ?? [], ppm), [schema?.walls, ppm])
+  const wallSegments = useMemo(() => buildWallCollisionSegments(viewerWalls, ppm), [viewerWalls, ppm])
   const overviewPosition = useMemo(() => chooseOverviewPosition(bounds), [bounds])
   const overviewLookAt = useMemo(() => new THREE.Vector3(bounds.centerX, 0.6, bounds.centerZ), [bounds])
   const sceneAnchor = useMemo(() => new THREE.Vector3(bounds.centerX, 0, bounds.centerZ), [bounds])
+  const showSchemaWalls = Boolean(!glbUrl || modelError || isFourRoom)
+  const viewerWindows = useMemo(() => {
+    const schemaWindows = (schema?.windows ?? []) as Opening[]
+    if (isFourRoom) {
+      const fallbackWindows = templateWindowsForFourRoom(viewerWalls)
+      return fallbackWindows.length ? fallbackWindows : schemaWindows
+    }
+    return schemaWindows
+  }, [isFourRoom, schema?.windows, viewerWalls])
   const rooms = useMemo(
     () =>
       (schema?.rooms ?? [])
@@ -1760,13 +1919,15 @@ export function Viewer3D({ glbUrl, schema, environment }: Props) {
           <SceneModel
             glbUrl={glbUrl}
             anchor={sceneAnchor}
+            hideWallLikeMeshes={showSchemaWalls}
             onLoadError={(message) => {
               setModelError(message)
             }}
           />
           </Suspense>
-          <WallOverlay walls={schema?.walls ?? []} ppm={ppm} />
-          <WindowOverlay windows={(schema?.windows as Opening[]) ?? []} walls={schema?.walls ?? []} ppm={ppm} />
+          {showSchemaWalls ? (
+            <WallOverlay walls={viewerWalls} windows={viewerWindows} ppm={ppm} />
+          ) : null}
           {rooms.map(({ room, centroid }) => (
             <RoomMarker
               key={room.id}

@@ -14,10 +14,12 @@ from app.models.schema import (
     LayoutPageExtraction,
     LayoutSchema,
     LayoutSummary,
+    Opening,
     ProjectSummary,
-    UploadManifest,
     SchemaFixResponse,
+    UploadManifest,
     UploadResponse,
+    Wall,
 )
 from app.services.blender_generator import BlenderGenerator
 from app.services.chat.agent import AgentEvent
@@ -58,6 +60,41 @@ class ProjectService:
         self.llm_editor = LlmSchemaEditor(settings)
         self.chat_service = ChatService(settings)
         self.vision_analyzer = VisionAnalyzer(settings)
+
+    @staticmethod
+    def _hardcoded_windows_for_four_room(schema: LayoutSchema) -> list[Opening]:
+        wall_ids = {wall.id for wall in schema.walls}
+        presets = [
+            Opening(id='window_1', wall_id='wall_window_living', center=[327.5, 220.0], width_m=3.51, height_m=1.2),
+            Opening(id='window_2', wall_id='wall_window_bedroom_left', center=[722.0, 49.25], width_m=2.28, height_m=1.2),
+            Opening(id='window_3', wall_id='wall_window_bedroom_middle', center=[1158.5, 49.25], width_m=1.67, height_m=1.2),
+            Opening(id='window_4', wall_id='wall_window_main_bedroom', center=[1493.5, 49.25], width_m=3.75, height_m=1.2),
+        ]
+        return [opening for opening in presets if opening.wall_id in wall_ids]
+
+    @staticmethod
+    def _hardcoded_window_walls_for_four_room(schema: LayoutSchema) -> list[Wall]:
+        existing_ids = {wall.id for wall in schema.walls}
+        presets = [
+            ('wall_window_living', [152.0, 220.0], [503.0, 220.0]),
+            ('wall_window_bedroom_left', [608.0, 49.25], [836.0, 49.25]),
+            ('wall_window_bedroom_middle', [1075.0, 49.25], [1242.0, 49.25]),
+            ('wall_window_main_bedroom', [1306.0, 49.25], [1681.0, 49.25]),
+        ]
+        return [
+            Wall(id=wall_id, start=start, end=end)
+            for wall_id, start, end in presets
+            if wall_id not in existing_ids
+        ]
+
+    def _normalize_windows_for_viewer(self, schema: LayoutSchema) -> LayoutSchema:
+        flat_type = str(schema.flat_type or '').lower()
+        if '4-room' not in flat_type:
+            return schema
+        walls = schema.walls + self._hardcoded_window_walls_for_four_room(schema)
+        normalized = schema.model_copy(update={'walls': walls})
+        windows = self._hardcoded_windows_for_four_room(normalized)
+        return normalized.model_copy(update={'windows': windows}) if windows else schema
 
     async def upload_pdf(self, source_name: str, content: bytes) -> UploadResponse:
         logger.info('upload.start source_name=%s bytes=%d', source_name, len(content))
@@ -449,6 +486,7 @@ class ProjectService:
                 'floor_area_sqm': regenerated.floor_area_sqm,
                 'rooms': regenerated.rooms,
                 'walls': regenerated.walls,
+                'furniture': regenerated.furniture,
                 'windows': regenerated.windows,
                 'todos': regenerated.todos,
             }
@@ -534,6 +572,7 @@ class ProjectService:
                     update={
                         'rooms': regenerated.rooms,
                         'walls': regenerated.walls,
+                        'furniture': schema.furniture or regenerated.furniture,
                         'windows': regenerated.windows,
                         'todos': list(dict.fromkeys(schema.todos + regenerated.todos)),
                     }
@@ -669,6 +708,7 @@ class ProjectService:
         return self.storage.resolve_local_url(layout.glb_url)
 
     def _layout_to_summary(self, row: object) -> LayoutSummary:
+        layout_schema = self._normalize_windows_for_viewer(LayoutSchema.model_validate(row.schema_json))
         return LayoutSummary(
             id=row.id,
             project_id=row.project_id,
@@ -680,10 +720,11 @@ class ProjectService:
             crop_image_url=row.crop_image_url,
             dxf_url=row.dxf_url,
             glb_url=row.glb_url,
-            layout_schema=LayoutSchema.model_validate(row.schema_json),
+            layout_schema=layout_schema,
         )
 
     def _local_layout_to_summary(self, row: object) -> LayoutSummary:
+        layout_schema = self._normalize_windows_for_viewer(LayoutSchema.model_validate(row.schema_json))
         return LayoutSummary(
             id=row.id,
             project_id=row.project_id,
@@ -695,5 +736,5 @@ class ProjectService:
             crop_image_url=row.crop_image_url,
             dxf_url=row.dxf_url,
             glb_url=row.glb_url,
-            layout_schema=LayoutSchema.model_validate(row.schema_json),
+            layout_schema=layout_schema,
         )

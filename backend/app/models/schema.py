@@ -42,6 +42,7 @@ class Opening(BaseModel):
 class Furniture(BaseModel):
     id: str
     name: str
+    kind: str = 'generic'
     room_id: str | None = None
     position: list[float] = Field(default_factory=list)
     size_m: list[float] = Field(default_factory=lambda: [1.0, 1.0, 0.8])
