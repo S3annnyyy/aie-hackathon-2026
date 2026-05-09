@@ -17,15 +17,9 @@ def clear_scene() -> None:
 def make_material(name: str, rgba: tuple[float, float, float, float]) -> bpy.types.Material:
     mat = bpy.data.materials.new(name=name)
     mat.use_nodes = True
-    mat.blend_method = 'BLEND' if rgba[3] < 1 else 'OPAQUE'
-    if hasattr(mat, 'use_screen_refraction'):
-        mat.use_screen_refraction = rgba[3] < 1
     bsdf = mat.node_tree.nodes.get('Principled BSDF')
     if bsdf:
         bsdf.inputs[0].default_value = rgba
-        alpha = bsdf.inputs.get('Alpha')
-        if alpha:
-            alpha.default_value = rgba[3]
     return mat
 
 
@@ -169,6 +163,101 @@ def normalize_walls(walls: list[dict], pixels_per_meter: float) -> list[dict]:
     return cleaned
 
 
+def normalize_windows(windows: list[dict], pixels_per_meter: float) -> list[dict]:
+    normalized: list[dict] = []
+    for opening in windows:
+        center = opening.get('center', [0, 0])
+        if len(center) < 2:
+            continue
+        normalized.append(
+            {
+                'id': opening.get('id', 'window'),
+                'wall_id': opening.get('wall_id'),
+                'center': [float(center[0]) / pixels_per_meter, float(center[1]) / pixels_per_meter],
+                'width_m': max(float(opening.get('width_m', 0.9)), 0.15),
+                'height_m': float(opening.get('height_m', 1.2)),
+            }
+        )
+    return normalized
+
+
+def _segment_is_horizontal(start: tuple[float, float], end: tuple[float, float]) -> bool:
+    return abs(start[1] - end[1]) <= abs(start[0] - end[0])
+
+
+def _subtract_openings_from_span(
+    span: tuple[float, float],
+    openings: list[dict],
+    *,
+    wall_coord: float,
+    is_horizontal: bool,
+) -> list[tuple[float, float]]:
+    spans = [span]
+    gap_pad = 0.03
+    min_span = 0.15
+
+    for opening in openings:
+        center = opening.get('center', [0, 0])
+        if len(center) < 2:
+            continue
+        width = float(opening.get('width_m', 0.9))
+        if width <= 0:
+            continue
+
+        opening_coord = float(center[1] if is_horizontal else center[0])
+        if abs(opening_coord - wall_coord) > 0.25:
+            continue
+
+        half = width / 2.0
+        gap_start = (float(center[0]) - half - gap_pad) if is_horizontal else (float(center[1]) - half - gap_pad)
+        gap_end = (float(center[0]) + half + gap_pad) if is_horizontal else (float(center[1]) + half + gap_pad)
+
+        updated: list[tuple[float, float]] = []
+        for start, end in spans:
+            if gap_end <= start or gap_start >= end:
+                updated.append((start, end))
+                continue
+            if gap_start > start + min_span:
+                updated.append((start, min(gap_start, end)))
+            if gap_end < end - min_span:
+                updated.append((max(gap_end, start), end))
+        spans = updated
+
+    return [segment for segment in spans if segment[1] - segment[0] >= min_span]
+
+
+def add_wall_with_openings(wall: dict, openings: list[dict], mat: bpy.types.Material) -> None:
+    start = wall.get('start', [0, 0])
+    end = wall.get('end', [0, 0])
+    if len(start) < 2 or len(end) < 2:
+        return
+
+    sx, sy = float(start[0]), float(start[1])
+    ex, ey = float(end[0]), float(end[1])
+    thickness = float(wall.get('thickness_m', 0.12))
+    height = float(wall.get('height_m', 2.8))
+    length = _segment_length((sx, sy), (ex, ey))
+    if length <= 0.2:
+        return
+
+    is_horizontal = _segment_is_horizontal((sx, sy), (ex, ey))
+    if is_horizontal:
+        wall_coord = (sy + ey) / 2.0
+        span_start, span_end = sorted((sx, ex))
+    else:
+        wall_coord = (sx + ex) / 2.0
+        span_start, span_end = sorted((sy, ey))
+
+    spans = _subtract_openings_from_span((span_start, span_end), openings, wall_coord=wall_coord, is_horizontal=is_horizontal)
+    for seg_start, seg_end in spans:
+        if seg_end - seg_start <= 0.2:
+            continue
+        if is_horizontal:
+            add_wall((seg_start, wall_coord), (seg_end, wall_coord), thickness, height, mat)
+        else:
+            add_wall((wall_coord, seg_start), (wall_coord, seg_end), thickness, height, mat)
+
+
 def add_floor(width: float, depth: float, mat: bpy.types.Material) -> None:
     bpy.ops.mesh.primitive_plane_add(size=1, location=(width / 2, depth / 2, 0))
     obj = bpy.context.active_object
@@ -177,24 +266,12 @@ def add_floor(width: float, depth: float, mat: bpy.types.Material) -> None:
 
 
 def add_wall(start: tuple[float, float], end: tuple[float, float], thickness: float, height: float, mat: bpy.types.Material) -> None:
-    add_wall_box(start, end, thickness, 0.0, height, mat, 'wall')
-
-
-def add_wall_box(
-    start: tuple[float, float],
-    end: tuple[float, float],
-    thickness: float,
-    z_min: float,
-    z_max: float,
-    mat: bpy.types.Material,
-    name: str,
-) -> None:
     sx, sy = start
     ex, ey = end
     dx, dy = ex - sx, ey - sy
     length = (dx**2 + dy**2) ** 0.5
     # Skip tiny wall fragments produced by noisy vectorization.
-    if length <= 0.2 or z_max <= z_min:
+    if length <= 0.2:
         return
 
     cx, cy = (sx + ex) / 2.0, (sy + ey) / 2.0
@@ -204,158 +281,11 @@ def add_wall_box(
 
         angle = math.atan2(dy, dx)
 
-    height = z_max - z_min
-    bpy.ops.mesh.primitive_cube_add(location=(cx, cy, z_min + height / 2))
+    bpy.ops.mesh.primitive_cube_add(location=(cx, cy, height / 2))
     wall = bpy.context.active_object
-    wall.name = name
     wall.scale = (length / 2, thickness / 2, height / 2)
     wall.rotation_euler[2] = angle
     wall.data.materials.append(mat)
-
-
-def _project_t_on_segment(point: tuple[float, float], start: tuple[float, float], end: tuple[float, float]) -> float:
-    sx, sy = start
-    ex, ey = end
-    dx, dy = ex - sx, ey - sy
-    denom = dx * dx + dy * dy
-    if denom <= 0:
-        return 0.0
-    return ((point[0] - sx) * dx + (point[1] - sy) * dy) / denom
-
-
-def _point_segment_distance(point: tuple[float, float], start: tuple[float, float], end: tuple[float, float]) -> float:
-    t = max(0.0, min(1.0, _project_t_on_segment(point, start, end)))
-    px = start[0] + (end[0] - start[0]) * t
-    py = start[1] + (end[1] - start[1]) * t
-    return math.hypot(point[0] - px, point[1] - py)
-
-
-def _windows_for_wall(
-    windows: list[dict],
-    start: tuple[float, float],
-    end: tuple[float, float],
-    *,
-    max_distance: float = 0.35,
-) -> list[dict]:
-    length = _segment_length(start, end)
-    matches: list[dict] = []
-    if length <= 0:
-        return matches
-
-    for window in windows:
-        center = window.get('center', [])
-        if len(center) < 2:
-            continue
-        point = (float(center[0]), float(center[1]))
-        t = _project_t_on_segment(point, start, end)
-        if t < -0.05 or t > 1.05:
-            continue
-        if _point_segment_distance(point, start, end) > max_distance:
-            continue
-        width = max(0.45, min(float(window.get('width_m', 1.1)), length * 0.85))
-        height = max(0.65, min(float(window.get('height_m', 1.15)), 1.55))
-        matches.append({'t': max(0.0, min(1.0, t)), 'width': width, 'height': height, 'id': window.get('id', 'window')})
-
-    return sorted(matches, key=lambda item: item['t'])
-
-
-def add_window_panel(
-    center: tuple[float, float],
-    angle: float,
-    width: float,
-    window_height: float,
-    sill_height: float,
-    mat: bpy.types.Material,
-    frame_mat: bpy.types.Material,
-) -> None:
-    z_mid = sill_height + window_height / 2
-    bpy.ops.mesh.primitive_cube_add(location=(center[0], center[1], z_mid))
-    glass = bpy.context.active_object
-    glass.name = 'window::glass'
-    glass.scale = (width / 2, 0.025, window_height / 2)
-    glass.rotation_euler[2] = angle
-    glass.data.materials.append(mat)
-
-    frame_thickness = 0.045
-    for x_offset, z_offset, sx, sz in (
-        (0.0, -window_height / 2, width / 2, frame_thickness),
-        (0.0, window_height / 2, width / 2, frame_thickness),
-        (-width / 2, 0.0, frame_thickness, window_height / 2),
-        (width / 2, 0.0, frame_thickness, window_height / 2),
-    ):
-        local_x = x_offset
-        wx = center[0] + math.cos(angle) * local_x
-        wy = center[1] + math.sin(angle) * local_x
-        bpy.ops.mesh.primitive_cube_add(location=(wx, wy, z_mid + z_offset))
-        frame = bpy.context.active_object
-        frame.name = 'window::frame'
-        frame.scale = (sx, 0.035, sz)
-        frame.rotation_euler[2] = angle
-        frame.data.materials.append(frame_mat)
-
-
-def add_wall_with_windows(
-    start: tuple[float, float],
-    end: tuple[float, float],
-    thickness: float,
-    height: float,
-    wall_mat: bpy.types.Material,
-    window_mat: bpy.types.Material,
-    frame_mat: bpy.types.Material,
-    windows: list[dict],
-) -> None:
-    length = _segment_length(start, end)
-    if length <= 0.2:
-        return
-    matches = _windows_for_wall(windows, start, end)
-    if not matches:
-        add_wall(start, end, thickness, height, wall_mat)
-        return
-
-    sx, sy = start
-    ex, ey = end
-    ux, uy = (ex - sx) / length, (ey - sy) / length
-    angle = math.atan2(ey - sy, ex - sx)
-    sill_height = min(0.9, height * 0.42)
-    cursor = 0.0
-
-    for match in matches:
-        half_width = float(match['width']) / 2
-        win_start = max(0.0, (float(match['t']) * length) - half_width)
-        win_end = min(length, (float(match['t']) * length) + half_width)
-        if win_end - win_start < 0.3:
-            continue
-
-        if win_start - cursor > 0.2:
-            add_wall_box(
-                (sx + ux * cursor, sy + uy * cursor),
-                (sx + ux * win_start, sy + uy * win_start),
-                thickness,
-                0.0,
-                height,
-                wall_mat,
-                'wall',
-            )
-
-        opening_start = (sx + ux * win_start, sy + uy * win_start)
-        opening_end = (sx + ux * win_end, sy + uy * win_end)
-        window_height = min(float(match['height']), max(0.45, height - sill_height - 0.25))
-        window_top = min(height, sill_height + window_height)
-        add_wall_box(opening_start, opening_end, thickness, 0.0, sill_height, wall_mat, 'wall::below_window')
-        add_wall_box(opening_start, opening_end, thickness, window_top, height, wall_mat, 'wall::above_window')
-        add_window_panel(
-            ((opening_start[0] + opening_end[0]) / 2, (opening_start[1] + opening_end[1]) / 2),
-            angle,
-            win_end - win_start,
-            window_height,
-            sill_height,
-            window_mat,
-            frame_mat,
-        )
-        cursor = max(cursor, win_end)
-
-    if length - cursor > 0.2:
-        add_wall_box((sx + ux * cursor, sy + uy * cursor), end, thickness, 0.0, height, wall_mat, 'wall')
 
 
 def add_room_marker(name: str, poly: list[list[float]]) -> None:
@@ -383,23 +313,6 @@ def add_furniture_placeholder(position: list[float], size: list[float], mat: bpy
     obj.data.materials.append(mat)
 
 
-def scale_windows(windows: list[dict], pixels_per_meter: float) -> list[dict]:
-    scaled: list[dict] = []
-    for window in windows:
-        center = window.get('center', [])
-        if len(center) < 2:
-            continue
-        scaled.append(
-            {
-                'id': window.get('id', f'window_{len(scaled) + 1}'),
-                'center': [float(center[0]) / pixels_per_meter, float(center[1]) / pixels_per_meter],
-                'width_m': float(window.get('width_m', 1.1)),
-                'height_m': float(window.get('height_m', 1.15)),
-            }
-        )
-    return scaled
-
-
 def add_lights_and_camera(width: float, depth: float) -> None:
     bpy.ops.object.light_add(type='SUN', location=(width * 0.5, depth * 0.5, 8.0))
     sun = bpy.context.active_object
@@ -413,6 +326,15 @@ def add_lights_and_camera(width: float, depth: float) -> None:
     bpy.context.scene.camera = camera
 
 
+def _attach_orphan_windows(windows: list[dict]) -> dict[str, list[dict]]:
+    grouped: dict[str, list[dict]] = {}
+    for window in windows:
+        wall_id = window.get('wall_id')
+        if wall_id:
+            grouped.setdefault(str(wall_id), []).append(window)
+    return grouped
+
+
 def build_scene(payload: dict) -> None:
     clear_scene()
 
@@ -422,9 +344,10 @@ def build_scene(payload: dict) -> None:
 
     raw_walls = payload.get('walls', [])
     walls = normalize_walls(raw_walls, pixels_per_meter)
+    windows = normalize_windows(payload.get('windows', []), pixels_per_meter)
+    windows_by_wall = _attach_orphan_windows(windows)
     rooms = payload.get('rooms', [])
     furniture = payload.get('furniture', [])
-    windows = scale_windows(payload.get('windows', []), pixels_per_meter)
 
     all_points = []
     for room in rooms:
@@ -432,8 +355,6 @@ def build_scene(payload: dict) -> None:
     for wall in raw_walls:
         all_points.append(wall.get('start', [0, 0]))
         all_points.append(wall.get('end', [0, 0]))
-    for window in payload.get('windows', []):
-        all_points.append(window.get('center', [0, 0]))
 
     max_x = max((p[0] for p in all_points), default=100.0) / pixels_per_meter
     max_y = max((p[1] for p in all_points), default=100.0) / pixels_per_meter
@@ -443,26 +364,11 @@ def build_scene(payload: dict) -> None:
     wall_mat = make_material('Wall', (0.94, 0.94, 0.9, 1.0))
     floor_mat = make_material('Floor', (0.73, 0.62, 0.48, 1.0))
     furniture_mat = make_material('Furniture', (0.75, 0.75, 0.75, 1.0))
-    window_mat = make_material('WindowGlass', (0.45, 0.78, 0.95, 0.38))
-    frame_mat = make_material('WindowFrame', (0.12, 0.18, 0.22, 1.0))
 
     add_floor(width, depth, floor_mat)
 
     for wall in walls:
-        start = wall.get('start', [0, 0])
-        end = wall.get('end', [0, 0])
-        thickness = float(wall.get('thickness_m', 0.12))
-        height = float(wall.get('height_m', 2.8))
-        add_wall_with_windows(
-            (start[0], start[1]),
-            (end[0], end[1]),
-            thickness,
-            height,
-            wall_mat,
-            window_mat,
-            frame_mat,
-            windows,
-        )
+        add_wall_with_openings(wall, windows_by_wall.get(str(wall['id']), []), wall_mat)
 
     for room in rooms:
         poly = room.get('polygon', [])
