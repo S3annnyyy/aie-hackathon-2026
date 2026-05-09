@@ -377,7 +377,7 @@ class ProjectService:
         layout = await self.get_layout(layout_id)
         if not layout:
             return None
-        updated_schema, diff = self.llm_editor.apply_fix(layout.schema, prompt, object_id)
+        updated_schema, diff = self.llm_editor.apply_fix(layout.layout_schema, prompt, object_id)
         await self.patch_schema(layout_id, updated_schema)
 
         change_id = None
@@ -385,7 +385,7 @@ class ProjectService:
             change = await self.repository.append_change_log(layout_id, prompt, object_id, diff)
             change_id = change.id
 
-        return SchemaFixResponse(layout_id=layout_id, change_log_id=change_id, schema=updated_schema, diff=diff)
+        return SchemaFixResponse(layout_id=layout_id, change_log_id=change_id, layout_schema=updated_schema, diff=diff)
 
     async def re_extract_layout(self, layout_id: UUID) -> ExtractionResponse | None:
         logger.info('reextract.start layout_id=%s', layout_id)
@@ -433,15 +433,15 @@ class ProjectService:
             len(vectorized.todos),
         )
         regenerated = self.schema_generator.build(
-            project_id=layout.schema.project_id,
-            layout_id=layout.schema.layout_id,
+            project_id=layout.layout_schema.project_id,
+            layout_id=layout.layout_schema.layout_id,
             source_page=layout.source_page,
             metadata=metadata,
             vectorized=vectorized,
             room_hints=room_hints,
         )
         regenerated = regenerated.model_copy(update={'todos': regenerated.todos + metadata_todos})
-        schema = layout.schema.model_copy(
+        schema = layout.layout_schema.model_copy(
             update={
                 'flat_type': regenerated.flat_type,
                 'floor_area_sqm': regenerated.floor_area_sqm,
@@ -452,7 +452,7 @@ class ProjectService:
         )
         await self.patch_schema(layout_id, schema)
         logger.info('reextract.complete layout_id=%s rooms=%d walls=%d', layout_id, len(schema.rooms), len(schema.walls))
-        return ExtractionResponse(layout_id=layout_id, schema=schema)
+        return ExtractionResponse(layout_id=layout_id, layout_schema=schema)
 
     def _room_hints_from_page_layout(self, layout: ExtractedPageLayout) -> list[LlmRoomHint]:
         hints: list[LlmRoomHint] = []
@@ -484,7 +484,7 @@ class ProjectService:
         if not layout:
             logger.warning('dxf.layout_not_found layout_id=%s', layout_id)
             return None
-        data = self.dxf_exporter.export(layout.schema)
+        data = self.dxf_exporter.export(layout.layout_schema)
         _, url = self.storage.save_dxf(layout.project_id, str(layout_id), data)
 
         if self.repository.enabled:
@@ -501,7 +501,7 @@ class ProjectService:
             logger.warning('glb.layout_not_found layout_id=%s', layout_id)
             return None
 
-        schema = layout.schema
+        schema = layout.layout_schema
         if self._schema_needs_simplification(schema) and layout.crop_image_url:
             crop_path = self.storage.resolve_local_url(layout.crop_image_url)
             if crop_path.exists():
@@ -578,7 +578,7 @@ class ProjectService:
         schema_dirty = False
 
         loop = asyncio.get_running_loop()
-        sync_iter = self.chat_service.run(layout_id, user_message, layout.schema)
+        sync_iter = self.chat_service.run(layout_id, user_message, layout.layout_schema)
         sentinel = object()
 
         while True:
@@ -676,7 +676,7 @@ class ProjectService:
             crop_image_url=row.crop_image_url,
             dxf_url=row.dxf_url,
             glb_url=row.glb_url,
-            schema=LayoutSchema.model_validate(row.schema_json),
+            layout_schema=LayoutSchema.model_validate(row.schema_json),
         )
 
     def _local_layout_to_summary(self, row: object) -> LayoutSummary:
@@ -691,5 +691,5 @@ class ProjectService:
             crop_image_url=row.crop_image_url,
             dxf_url=row.dxf_url,
             glb_url=row.glb_url,
-            schema=LayoutSchema.model_validate(row.schema_json),
+            layout_schema=LayoutSchema.model_validate(row.schema_json),
         )

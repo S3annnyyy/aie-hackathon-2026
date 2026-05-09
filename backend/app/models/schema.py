@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ScaleInfo(BaseModel):
@@ -82,7 +82,9 @@ class LayoutSummary(BaseModel):
     crop_image_url: str | None = None
     dxf_url: str | None = None
     glb_url: str | None = None
-    schema: LayoutSchema
+    layout_schema: LayoutSchema = Field(alias='schema')
+
+    model_config = ConfigDict(validate_by_name=True, serialize_by_alias=True)
 
 
 class ExtractedPageLayout(BaseModel):
@@ -125,7 +127,9 @@ class UploadManifest(BaseModel):
 
 
 class SchemaPatchRequest(BaseModel):
-    schema: LayoutSchema
+    layout_schema: LayoutSchema = Field(alias='schema')
+
+    model_config = ConfigDict(validate_by_name=True, serialize_by_alias=True)
 
 
 class SchemaFixPromptRequest(BaseModel):
@@ -140,8 +144,10 @@ class ChatRequest(BaseModel):
 class SchemaFixResponse(BaseModel):
     layout_id: UUID
     change_log_id: UUID | None = None
-    schema: LayoutSchema
+    layout_schema: LayoutSchema = Field(alias='schema')
     diff: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(validate_by_name=True, serialize_by_alias=True)
 
 
 class ArtifactResponse(BaseModel):
@@ -151,4 +157,6 @@ class ArtifactResponse(BaseModel):
 
 class ExtractionResponse(BaseModel):
     layout_id: UUID
-    schema: LayoutSchema
+    layout_schema: LayoutSchema = Field(alias='schema')
+
+    model_config = ConfigDict(validate_by_name=True, serialize_by_alias=True)

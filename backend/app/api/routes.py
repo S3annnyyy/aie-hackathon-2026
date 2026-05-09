@@ -59,7 +59,7 @@ async def get_layout(request: Request, layout_id: UUID) -> LayoutSummary:
 @router.patch('/layouts/{layout_id}/schema', response_model=LayoutSummary)
 async def patch_layout_schema(request: Request, layout_id: UUID, payload: SchemaPatchRequest) -> LayoutSummary:
     service = request.app.state.project_service
-    layout = await service.patch_schema(layout_id, payload.schema)
+    layout = await service.patch_schema(layout_id, payload.layout_schema)
     if not layout:
         raise HTTPException(status_code=404, detail='Layout not found.')
     return layout
