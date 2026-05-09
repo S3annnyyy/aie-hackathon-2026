@@ -163,6 +163,101 @@ def normalize_walls(walls: list[dict], pixels_per_meter: float) -> list[dict]:
     return cleaned
 
 
+def normalize_windows(windows: list[dict], pixels_per_meter: float) -> list[dict]:
+    normalized: list[dict] = []
+    for opening in windows:
+        center = opening.get('center', [0, 0])
+        if len(center) < 2:
+            continue
+        normalized.append(
+            {
+                'id': opening.get('id', 'window'),
+                'wall_id': opening.get('wall_id'),
+                'center': [float(center[0]) / pixels_per_meter, float(center[1]) / pixels_per_meter],
+                'width_m': max(float(opening.get('width_m', 0.9)), 0.15),
+                'height_m': float(opening.get('height_m', 1.2)),
+            }
+        )
+    return normalized
+
+
+def _segment_is_horizontal(start: tuple[float, float], end: tuple[float, float]) -> bool:
+    return abs(start[1] - end[1]) <= abs(start[0] - end[0])
+
+
+def _subtract_openings_from_span(
+    span: tuple[float, float],
+    openings: list[dict],
+    *,
+    wall_coord: float,
+    is_horizontal: bool,
+) -> list[tuple[float, float]]:
+    spans = [span]
+    gap_pad = 0.03
+    min_span = 0.15
+
+    for opening in openings:
+        center = opening.get('center', [0, 0])
+        if len(center) < 2:
+            continue
+        width = float(opening.get('width_m', 0.9))
+        if width <= 0:
+            continue
+
+        opening_coord = float(center[1] if is_horizontal else center[0])
+        if abs(opening_coord - wall_coord) > 0.25:
+            continue
+
+        half = width / 2.0
+        gap_start = (float(center[0]) - half - gap_pad) if is_horizontal else (float(center[1]) - half - gap_pad)
+        gap_end = (float(center[0]) + half + gap_pad) if is_horizontal else (float(center[1]) + half + gap_pad)
+
+        updated: list[tuple[float, float]] = []
+        for start, end in spans:
+            if gap_end <= start or gap_start >= end:
+                updated.append((start, end))
+                continue
+            if gap_start > start + min_span:
+                updated.append((start, min(gap_start, end)))
+            if gap_end < end - min_span:
+                updated.append((max(gap_end, start), end))
+        spans = updated
+
+    return [segment for segment in spans if segment[1] - segment[0] >= min_span]
+
+
+def add_wall_with_openings(wall: dict, openings: list[dict], mat: bpy.types.Material) -> None:
+    start = wall.get('start', [0, 0])
+    end = wall.get('end', [0, 0])
+    if len(start) < 2 or len(end) < 2:
+        return
+
+    sx, sy = float(start[0]), float(start[1])
+    ex, ey = float(end[0]), float(end[1])
+    thickness = float(wall.get('thickness_m', 0.12))
+    height = float(wall.get('height_m', 2.8))
+    length = _segment_length((sx, sy), (ex, ey))
+    if length <= 0.2:
+        return
+
+    is_horizontal = _segment_is_horizontal((sx, sy), (ex, ey))
+    if is_horizontal:
+        wall_coord = (sy + ey) / 2.0
+        span_start, span_end = sorted((sx, ex))
+    else:
+        wall_coord = (sx + ex) / 2.0
+        span_start, span_end = sorted((sy, ey))
+
+    spans = _subtract_openings_from_span((span_start, span_end), openings, wall_coord=wall_coord, is_horizontal=is_horizontal)
+    for seg_start, seg_end in spans:
+        if seg_end - seg_start <= 0.2:
+            continue
+        if is_horizontal:
+            add_wall((seg_start, wall_coord), (seg_end, wall_coord), thickness, height, mat)
+        else:
+            add_wall((wall_coord, seg_start), (wall_coord, seg_end), thickness, height, mat)
+
+
 def add_floor(width: float, depth: float, mat: bpy.types.Material) -> None:
     bpy.ops.mesh.primitive_plane_add(size=1, location=(width / 2, depth / 2, 0))
     obj = bpy.context.active_object
@@ -231,6 +326,15 @@ def add_lights_and_camera(width: float, depth: float) -> None:
     bpy.context.scene.camera = camera
 
 
+def _attach_orphan_windows(windows: list[dict]) -> dict[str, list[dict]]:
+    grouped: dict[str, list[dict]] = {}
+    for window in windows:
+        wall_id = window.get('wall_id')
+        if wall_id:
+            grouped.setdefault(str(wall_id), []).append(window)
+    return grouped
+
+
 def build_scene(payload: dict) -> None:
     clear_scene()
 
@@ -240,6 +344,8 @@ def build_scene(payload: dict) -> None:
 
     raw_walls = payload.get('walls', [])
     walls = normalize_walls(raw_walls, pixels_per_meter)
+    windows = normalize_windows(payload.get('windows', []), pixels_per_meter)
+    windows_by_wall = _attach_orphan_windows(windows)
     rooms = payload.get('rooms', [])
     furniture = payload.get('furniture', [])
 
@@ -262,11 +368,7 @@ def build_scene(payload: dict) -> None:
     add_floor(width, depth, floor_mat)
 
     for wall in walls:
-        start = wall.get('start', [0, 0])
-        end = wall.get('end', [0, 0])
-        thickness = float(wall.get('thickness_m', 0.12))
-        height = float(wall.get('height_m', 2.8))
-        add_wall((start[0], start[1]), (end[0], end[1]), thickness, height, wall_mat)
+        add_wall_with_openings(wall, windows_by_wall.get(str(wall['id']), []), wall_mat)
 
     for room in rooms:
         poly = room.get('polygon', [])

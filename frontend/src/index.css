@@ -1,9 +1,9 @@
 @import 'tailwindcss';
 
 /*
- * Design tokens — earthy terracotta & cream.
- * Exposed as CSS custom properties so non-Tailwind code (inline styles,
- * legacy components) can reference them via var(--token-name).
+ * Design tokens — earthy terracotta & cream for the landing, explore,
+ * and interior surfaces. The dark HUD editor (/designer) keeps its own
+ * set of tokens below, scoped under `.hud-shell`.
  */
 :root {
   /* Surfaces */
@@ -65,14 +65,14 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* Focus styles — consistent across buttons/inputs/links */
+/* Focus styles — consistent across buttons/inputs/links. */
 :focus-visible {
   outline: 2px solid var(--primary-terracotta);
   outline-offset: 2px;
   border-radius: 4px;
 }
 
-/* Scrollbar: subtle, matches palette */
+/* Scrollbar: subtle, matches palette. */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--border-warm-strong) transparent;
@@ -110,11 +110,13 @@ body {
 
 /* Chapter 02 — sequential spotlight on the three "views" tiles. */
 @keyframes stackview-tile-pulse {
-  0%, 100% {
+  0%,
+  100% {
     box-shadow: 0 1px 0 rgba(42, 34, 27, 0.08);
     transform: translateY(0);
   }
-  40%, 60% {
+  40%,
+  60% {
     box-shadow: 0 30px 60px -20px rgba(184, 107, 75, 0.45);
     transform: translateY(-6px);
   }
@@ -122,17 +124,22 @@ body {
 
 /* Chapter 03 — windows lighting up one at a time to suggest stack picker. */
 @keyframes stackview-window-glow {
-  0%, 85%, 100% {
+  0%,
+  85%,
+  100% {
     fill: #3d3028;
     opacity: 0.32;
   }
-  90%, 96% {
+  90%,
+  96% {
     fill: #f5c7a6;
     opacity: 1;
   }
 }
 
-/* --- Legacy card classes (used by existing editor screens until we migrate them) --- */
+/* --- Legacy/shared utility classes. Used by the earthy surfaces (explore
+ * card overlays, designer sidebars). The dark walkthrough HUD overrides
+ * these inside `.hud-shell` below. */
 .card {
   background: var(--surface-paper);
   border: 1px solid var(--border-warm);
@@ -235,4 +242,398 @@ textarea {
   min-height: 220px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   resize: vertical;
+}
+
+/* =========================================================================
+ * Dark 3D walkthrough HUD — used by /designer and the Viewer3D component.
+ * All dark surfaces live under this scope so the earthy pages above stay
+ * untouched. Variables are kept under `.hud-*` containers instead of :root
+ * to avoid accidental bleed into the rest of the app.
+ * ========================================================================= */
+
+.hud-shell,
+.viewer-shell {
+  --hud-bg: #07090c;
+  --hud-panel: rgba(14, 18, 24, 0.82);
+  --hud-panel-strong: rgba(10, 14, 20, 0.94);
+  --hud-panel-soft: rgba(255, 255, 255, 0.04);
+  --hud-text: #eff4fb;
+  --hud-subtext: #a5b0be;
+  --hud-accent: #7ad6cc;
+  --hud-accent-strong: #54b7ac;
+  --hud-border: rgba(186, 201, 214, 0.18);
+  --hud-shadow: 0 22px 60px rgba(0, 0, 0, 0.42);
+}
+
+.app-shell {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  color: var(--hud-text);
+  background: radial-gradient(circle at top left, rgba(122, 214, 204, 0.16), transparent 32%),
+    radial-gradient(circle at bottom right, rgba(84, 183, 172, 0.12), transparent 24%),
+    var(--hud-bg);
+  font-family: 'SF Pro Display', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.viewer-shell {
+  position: fixed;
+  inset: 0;
+}
+
+.viewer-stage {
+  position: absolute;
+  inset: 0;
+}
+
+.viewer-stage canvas {
+  display: block;
+}
+
+.viewer-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.viewer-topbar {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  right: 1rem;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  pointer-events: none;
+}
+
+.viewer-status,
+.viewer-actions,
+.viewer-hint,
+.viewer-error,
+.viewer-room-card {
+  pointer-events: auto;
+}
+
+.viewer-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.viewer-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.38rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(11, 15, 20, 0.72);
+  border: 1px solid rgba(122, 214, 204, 0.25);
+  color: var(--hud-text);
+  backdrop-filter: blur(16px);
+  box-shadow: var(--hud-shadow);
+  font-size: 0.82rem;
+}
+
+.viewer-badge-subtle {
+  border-color: rgba(255, 255, 255, 0.12);
+  color: var(--hud-subtext);
+}
+
+.viewer-actions {
+  margin-left: auto;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.viewer-actions button {
+  background: var(--hud-panel-strong);
+  border: 1px solid var(--hud-border);
+  border-radius: 18px;
+  padding: 0.68rem 0.92rem;
+  box-shadow: var(--hud-shadow);
+  backdrop-filter: blur(18px);
+  color: var(--hud-text);
+}
+
+.viewer-actions button:hover:not(:disabled) {
+  border-color: rgba(122, 214, 204, 0.38);
+  background: rgba(14, 18, 24, 0.96);
+}
+
+.viewer-hint {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(44rem, calc(100vw - 2rem));
+  width: calc(100vw - 2rem);
+}
+
+.viewer-hint-top {
+  top: 1rem;
+}
+
+.viewer-hint-bottom {
+  bottom: 1rem;
+}
+
+.viewer-room-card,
+.viewer-error {
+  background: var(--hud-panel-strong);
+  border: 1px solid var(--hud-border);
+  border-radius: 18px;
+  padding: 0.9rem 1rem;
+  box-shadow: var(--hud-shadow);
+  backdrop-filter: blur(18px);
+}
+
+.viewer-room-card {
+  width: min(34rem, 100%);
+}
+
+.viewer-error {
+  position: absolute;
+  bottom: 5.7rem;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #ffcece;
+  max-width: min(42rem, calc(100vw - 2rem));
+}
+
+.viewer-hint p {
+  margin: 0;
+  padding: 0.78rem 0.95rem;
+  border-radius: 16px;
+  background: rgba(11, 15, 20, 0.68);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(18px);
+  box-shadow: var(--hud-shadow);
+  color: var(--hud-subtext);
+}
+
+.room-marker-label {
+  --room-marker-scale: 0.92;
+  padding: 0.48rem 0.8rem;
+  border-radius: 999px;
+  background: rgba(28, 34, 41, 0.84);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: rgba(250, 252, 255, 0.98);
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  transform-origin: center center;
+  transform: translateY(0.3rem) scale(var(--room-marker-scale));
+  transition: opacity 140ms ease, transform 140ms ease, border-color 140ms ease, background 140ms ease;
+  white-space: nowrap;
+  box-shadow: var(--hud-shadow);
+  backdrop-filter: blur(14px);
+}
+
+.room-marker-label.is-visible {
+  opacity: 0.98;
+  transform: translateY(0) scale(var(--room-marker-scale));
+  border-color: rgba(122, 214, 204, 0.36);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+.hud-shell {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+}
+
+.hud-topbar {
+  position: absolute;
+  top: 4.9rem;
+  left: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  pointer-events: auto;
+}
+
+.hud-notice {
+  margin: 0;
+  max-width: min(42rem, calc(100vw - 10rem));
+  color: var(--hud-subtext);
+  background: rgba(11, 15, 20, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  padding: 0.42rem 0.75rem;
+  box-shadow: var(--hud-shadow);
+  backdrop-filter: blur(16px);
+}
+
+.hud-columns {
+  position: absolute;
+  inset: 8.2rem 1rem 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.hud-column {
+  pointer-events: auto;
+  width: min(29rem, calc(50vw - 1.5rem));
+  max-height: 100%;
+  overflow: auto;
+  display: grid;
+  gap: 1rem;
+  padding-right: 0.15rem;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(122, 214, 204, 0.45) rgba(255, 255, 255, 0.05);
+  scrollbar-gutter: stable;
+}
+
+.hud-column::-webkit-scrollbar {
+  width: 8px;
+}
+
+.hud-column::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 999px;
+}
+
+.hud-column::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(122, 214, 204, 0.58), rgba(84, 183, 172, 0.38));
+  border-radius: 999px;
+  border: 2px solid rgba(10, 14, 20, 0.92);
+}
+
+.hud-column::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(122, 214, 204, 0.76), rgba(84, 183, 172, 0.56));
+}
+
+/* Inside the dark HUD, re-skin the shared utility classes to the dark
+ * palette so components ported from the earthy pages (cards, inputs, etc)
+ * feel native. */
+.hud-shell .card,
+.hud-column .card {
+  background: var(--hud-panel);
+  border: 1px solid var(--hud-border);
+  border-radius: 18px;
+  padding: 0.95rem;
+  box-shadow: var(--hud-shadow);
+  backdrop-filter: blur(18px);
+  color: var(--hud-text);
+}
+
+.hud-shell .card h3,
+.hud-column .card h3 {
+  margin-top: 0;
+  margin-bottom: 0.65rem;
+  letter-spacing: 0.01em;
+}
+
+.hud-shell .muted,
+.hud-column .muted {
+  color: var(--hud-subtext);
+}
+
+.hud-shell .layout-item,
+.hud-column .layout-item {
+  border: 1px solid var(--hud-border);
+  border-radius: 12px;
+  padding: 0.7rem;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.hud-shell .layout-item.active,
+.hud-column .layout-item.active {
+  border-color: rgba(122, 214, 204, 0.5);
+  box-shadow: 0 0 0 2px rgba(122, 214, 204, 0.12);
+}
+
+.hud-shell .badge,
+.hud-column .badge {
+  background: rgba(122, 214, 204, 0.14);
+  color: #c7fffb;
+  border: 1px solid rgba(122, 214, 204, 0.18);
+}
+
+.hud-shell input,
+.hud-shell textarea,
+.hud-shell select,
+.hud-column input,
+.hud-column textarea,
+.hud-column select {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--hud-text);
+  border: 1px solid var(--hud-border);
+}
+
+.hud-shell input::placeholder,
+.hud-shell textarea::placeholder,
+.hud-column input::placeholder,
+.hud-column textarea::placeholder {
+  color: rgba(165, 176, 190, 0.72);
+}
+
+.hud-shell input:focus,
+.hud-shell textarea:focus,
+.hud-shell select:focus,
+.hud-column input:focus,
+.hud-column textarea:focus,
+.hud-column select:focus {
+  border-color: rgba(122, 214, 204, 0.55);
+  box-shadow: 0 0 0 2px rgba(122, 214, 204, 0.12);
+}
+
+.hud-shell button,
+.hud-column button {
+  border: 1px solid var(--hud-border);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+  color: var(--hud-text);
+  border-radius: 12px;
+}
+
+.hud-shell button:hover:not(:disabled),
+.hud-column button:hover:not(:disabled) {
+  border-color: rgba(122, 214, 204, 0.45);
+  box-shadow: 0 0 0 1px rgba(122, 214, 204, 0.12);
+  transform: translateY(-1px);
+}
+
+img {
+  display: block;
+}
+
+@media (max-width: 1120px) {
+  .viewer-topbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .viewer-hint {
+    width: calc(100vw - 1rem);
+  }
+
+  .hud-columns {
+    inset: 8.2rem 0.75rem 0.75rem;
+    flex-direction: column;
+    justify-content: flex-start;
+  }
+
+  .hud-column {
+    width: min(100%, 40rem);
+  }
+}
+
+@media (max-width: 760px) {
+  .hud-topbar {
+    flex-wrap: wrap;
+    top: 5.1rem;
+  }
+
+  .hud-notice {
+    max-width: calc(100vw - 2rem);
+  }
+
+  .viewer-room-card {
+    width: 100%;
+  }
 }

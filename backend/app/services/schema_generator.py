@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import math
 
-from app.models.schema import LayoutMetadata, LayoutSchema, Room, Wall
+from app.models.schema import LayoutMetadata, LayoutSchema, Opening, Room, ScaleInfo, Wall
 from app.services.image_vectorizer import VectorizedData
 from app.services.llm_layout_metadata_extractor import LlmRoomHint
 
 
 class SchemaGenerator:
+    pixels_per_meter: float = 100.0
+
     @staticmethod
     def _segment_length(start: tuple[float, float], end: tuple[float, float]) -> float:
         dx = end[0] - start[0]
@@ -268,7 +270,6 @@ class SchemaGenerator:
         merged = list(outline)
         outline_keys = {self._canonical_key(s, e) for s, e in outline}
 
-        # Add extra non-duplicate structural partitions from detected line work.
         added = 0
         for s, e in candidates:
             key = self._canonical_key(s, e)
@@ -280,6 +281,68 @@ class SchemaGenerator:
             if added >= 18:
                 break
         return sorted(merged, key=lambda seg: self._segment_length(seg[0], seg[1]), reverse=True)[:42]
+
+    @staticmethod
+    def _segment_is_horizontal(start: tuple[float, float], end: tuple[float, float]) -> bool:
+        return abs(start[1] - end[1]) <= abs(start[0] - end[0])
+
+    def _match_window_wall_id(
+        self,
+        opening: tuple[tuple[float, float], tuple[float, float]],
+        walls: list[Wall],
+    ) -> str | None:
+        start, end = opening
+        is_horizontal = self._segment_is_horizontal(start, end)
+        open_center = ((start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0)
+        open_span = (min(start[0], end[0]), max(start[0], end[0])) if is_horizontal else (min(start[1], end[1]), max(start[1], end[1]))
+
+        best_wall_id: str | None = None
+        best_score = float('inf')
+
+        for wall in walls:
+            wall_start = (float(wall.start[0]), float(wall.start[1]))
+            wall_end = (float(wall.end[0]), float(wall.end[1]))
+            wall_horizontal = self._segment_is_horizontal(wall_start, wall_end)
+            if wall_horizontal != is_horizontal:
+                continue
+            wall_coord = (wall_start[1] + wall_end[1]) / 2.0 if is_horizontal else (wall_start[0] + wall_end[0]) / 2.0
+            opening_coord = open_center[1] if is_horizontal else open_center[0]
+            coord_distance = abs(wall_coord - opening_coord)
+
+            wall_span = (min(wall_start[0], wall_end[0]), max(wall_start[0], wall_end[0])) if is_horizontal else (min(wall_start[1], wall_end[1]), max(wall_start[1], wall_end[1]))
+            overlap = max(0.0, min(wall_span[1], open_span[1]) - max(wall_span[0], open_span[0]))
+            if overlap <= 0:
+                continue
+
+            score = coord_distance * 10.0 - overlap
+            if score < best_score:
+                best_score = score
+                best_wall_id = wall.id
+
+        return best_wall_id
+
+    def _openings_from_window_segments(
+        self,
+        windows: list[tuple[tuple[float, float], tuple[float, float]]],
+        walls: list[Wall],
+    ) -> list[Opening]:
+        openings: list[Opening] = []
+        for idx, seg in enumerate(windows, start=1):
+            start, end = seg
+            center_x = (start[0] + end[0]) / 2.0
+            center_y = (start[1] + end[1]) / 2.0
+            width_px = self._segment_length(start, end)
+            wall_id = self._match_window_wall_id(seg, walls)
+            openings.append(
+                Opening(
+                    id=f'window_{idx}',
+                    wall_id=wall_id,
+                    center=[center_x, center_y],
+                    width_m=max(width_px / self.pixels_per_meter, 0.2),
+                    height_m=1.2,
+                )
+            )
+        return openings
 
     def build(
         self,
@@ -306,6 +369,7 @@ class SchemaGenerator:
             )
         else:
             sorted_polygons = self._fallback_main_room_polygons(effective_room_hints, layout_bounds)
+
         for idx, poly in enumerate(sorted_polygons, start=1):
             hint = effective_room_hints[idx - 1] if idx - 1 < len(effective_room_hints) else None
             room_type = hint.room_type if hint else ('bedroom' if idx <= 2 else 'living')
@@ -321,16 +385,16 @@ class SchemaGenerator:
                 )
             )
 
-        outline_segments = self._walls_from_rooms(sorted_polygons)
         line_segments = self._walls_from_lines(vectorized.wall_segments)
-        wall_segments = self._merge_outline_and_partitions(outline_segments, line_segments)
-        if len(wall_segments) < 4:
-            wall_segments = line_segments
+        room_outline_segments = self._walls_from_rooms(sorted_polygons)
+        wall_segments = line_segments if len(line_segments) >= 4 else self._merge_outline_and_partitions(room_outline_segments, line_segments)
 
         walls: list[Wall] = []
         for idx, seg in enumerate(wall_segments, start=1):
             start, end = seg
             walls.append(Wall(id=f'wall_{idx}', start=[start[0], start[1]], end=[end[0], end[1]]))
+
+        openings = self._openings_from_window_segments(vectorized.window_segments, walls) if vectorized.window_segments else []
 
         return LayoutSchema(
             project_id=project_id,
@@ -343,7 +407,8 @@ class SchemaGenerator:
             rooms=rooms,
             walls=walls,
             doors=[],
-            windows=[],
+            windows=openings,
             furniture=[],
             todos=vectorized.todos,
+            scale=ScaleInfo(pixels_per_meter=self.pixels_per_meter),
         )

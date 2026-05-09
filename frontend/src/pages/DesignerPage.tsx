@@ -4,10 +4,8 @@ import { ChatPanel, type ChatPanelHandle } from '../features/chat/ChatPanel'
 import { InspirePanel } from '../features/chat/InspirePanel'
 import { LayoutList } from '../features/layouts/LayoutList'
 import { SchemaEditor } from '../features/layouts/SchemaEditor'
-import { RenderPanel } from '../features/render/RenderPanel'
 import { UploadPanel } from '../features/upload/UploadPanel'
-import { Viewer3D, type Viewer3DHandle } from '../features/viewer3d/Viewer3D'
-import type { Room } from '../lib/api'
+import { Viewer3D } from '../features/viewer3d/Viewer3D'
 import {
   exportDxf,
   fixSchema,
@@ -25,10 +23,16 @@ import {
   type ProjectSummary,
 } from '../lib/api'
 
+/**
+ * Full-page 3D walkthrough with a collapsible HUD. Shape ported from the
+ * main-branch landing so the walkthrough viewer keeps its HUD class names
+ * (.app-shell, .hud-shell, .hud-columns, .hud-column). The router mounts
+ * this at /designer; the landing, explore, and interior routes keep the
+ * earthy surface.
+ */
 export default function DesignerPage() {
   const chatRef = useRef<ChatPanelHandle>(null)
-  const viewerRef = useRef<Viewer3DHandle>(null)
-  const [selectedRoom, setSelectedRoom] = useState<Room | null>(null)
+  const [hudOpen, setHudOpen] = useState(true)
   const [busy, setBusy] = useState(false)
   const [project, setProject] = useState<ProjectSummary | null>(null)
   const [layouts, setLayouts] = useState<LayoutSummary[]>([])
@@ -56,11 +60,7 @@ export default function DesignerPage() {
     try {
       const uploaded = await uploadPdf(file)
       await refreshProject(uploaded.project_id)
-      setNotice(
-        `Detected ${uploaded.layout_ids.length} layout crop(s) from pages: ${
-          uploaded.detected_layout_page_numbers.join(', ') || 'none'
-        }.`,
-      )
+      setNotice('Upload complete.')
     } catch (error) {
       setNotice(`Upload failed: ${String(error)}`)
     } finally {
@@ -170,134 +170,123 @@ export default function DesignerPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[1400px] p-4 md:p-6">
-      <header className="mb-4">
-        <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold tracking-tight text-espresso md:text-4xl">
-          Designer
-        </h1>
-        <p className="mt-1 text-sm text-muted md:text-base">{notice}</p>
-      </header>
+    <div className="app-shell">
+      <Viewer3D glbUrl={glbUrl} schema={selectedLayout?.schema ?? null} />
 
-      <div className="grid gap-4 md:grid-cols-[320px_1fr_460px]">
-        <div className="space-y-4">
-          <UploadPanel onUpload={onUpload} busy={busy} />
-          <LayoutList
-            layouts={layouts}
-            selectedLayoutId={selectedLayoutId}
-            onSelect={selectLayout}
-          />
-          {project ? (
-            <div className="card">
-              <h3 className="mb-2 text-base font-semibold">Project</h3>
-              <div className="muted">ID: {project.id}</div>
-              <div className="muted">Source: {project.source_pdf_name}</div>
-              <div className="muted">Status: {project.status}</div>
-            </div>
-          ) : null}
+      <div className="hud-shell">
+        <div className="hud-topbar">
+          <button onClick={() => setHudOpen((value) => !value)}>
+            {hudOpen ? 'Hide HUD' : 'Show HUD'}
+          </button>
+          <p className="hud-notice">{notice}</p>
         </div>
 
-        <div className="space-y-4">
-          <div className="card">
-            <h3 className="mb-2 text-base font-semibold">Layout Preview</h3>
-            {selectedLayout?.crop_image_url ? (
-              <img
-                src={toAssetUrl(selectedLayout.crop_image_url) ?? ''}
-                alt="Floorplan crop extracted from brochure"
-                className="w-full rounded-xl border border-line"
+        {hudOpen ? (
+          <div className="hud-columns">
+            <div className="hud-column">
+              <UploadPanel onUpload={onUpload} busy={busy} />
+              <LayoutList
+                layouts={layouts}
+                selectedLayoutId={selectedLayoutId}
+                onSelect={selectLayout}
               />
-            ) : (
-              <p className="muted">Select a layout to preview crop.</p>
-            )}
-            <div className="toolbar mt-3">
-              <button onClick={onRerunExtraction} disabled={!selectedLayoutId || busy}>
-                Re-extract Schema
-              </button>
-              <button onClick={onExportDxf} disabled={!selectedLayoutId || busy}>
-                Export DXF
-              </button>
-              <button
-                onClick={onGenerateGlb}
-                disabled={!selectedLayoutId || busy}
-                className="!border-terracotta/40 !bg-terracotta !text-white hover:!border-terracotta-dark hover:!bg-terracotta-dark"
-              >
-                Generate 3D
-              </button>
-            </div>
-          </div>
-
-          <div className="card">
-            <h3 className="mb-2 text-base font-semibold">Extracted Metadata</h3>
-            {selectedLayout ? (
-              <div>
-                <div className="muted">
-                  Flat type: {selectedLayout.flat_type ?? selectedLayout.schema.flat_type ?? 'N/A'}
+              {project ? (
+                <div className="card">
+                  <h3>Project</h3>
+                  <div className="muted">ID: {project.id}</div>
+                  <div className="muted">Source: {project.source_pdf_name}</div>
+                  <div className="muted">Status: {project.status}</div>
                 </div>
-                <div className="muted">
-                  Approx area:{' '}
-                  {selectedLayout.floor_area_sqm ?? selectedLayout.schema.floor_area_sqm ?? 'N/A'}{' '}
-                  sqm
-                </div>
-                <div className="mt-3">
-                  <strong>Rooms</strong>
-                  {selectedLayout.schema.rooms.length ? (
-                    <div className="list mt-2">
-                      {selectedLayout.schema.rooms.map((room) => (
-                        <div key={room.id} className="layout-item">
-                          <div className="flex items-center justify-between">
-                            <strong>{room.name || room.id}</strong>
-                            <span className="badge">{room.type}</span>
-                          </div>
-                          <div className="muted">Object ID: {room.id}</div>
-                          <div className="muted">Area: {room.estimated_area_sqm ?? 'N/A'} sqm</div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="muted mt-2">No room labels detected yet.</p>
-                  )}
+              ) : null}
+              <div className="card">
+                <h3>Layout Preview</h3>
+                {selectedLayout?.crop_image_url ? (
+                  <img
+                    src={toAssetUrl(selectedLayout.crop_image_url) ?? ''}
+                    alt="floorplan crop"
+                    style={{ width: '100%', borderRadius: 10, border: '1px solid var(--hud-border)' }}
+                  />
+                ) : (
+                  <p className="muted">Select a layout to preview crop.</p>
+                )}
+                <div className="toolbar" style={{ marginTop: '0.75rem' }}>
+                  <button onClick={onRerunExtraction} disabled={!selectedLayoutId || busy}>
+                    Re-extract Schema
+                  </button>
+                  <button onClick={onExportDxf} disabled={!selectedLayoutId || busy}>
+                    Export DXF
+                  </button>
+                  <button onClick={onGenerateGlb} disabled={!selectedLayoutId || busy}>
+                    Generate 3D
+                  </button>
                 </div>
               </div>
-            ) : (
-              <p className="muted">Select a layout to inspect extracted metadata.</p>
-            )}
+              <div className="card">
+                <h3>Extracted Metadata</h3>
+                {selectedLayout ? (
+                  <div>
+                    <div className="muted">
+                      Flat type: {selectedLayout.flat_type ?? selectedLayout.schema.flat_type ?? 'N/A'}
+                    </div>
+                    <div className="muted">
+                      Approx area:{' '}
+                      {selectedLayout.floor_area_sqm ?? selectedLayout.schema.floor_area_sqm ?? 'N/A'}{' '}
+                      sqm
+                    </div>
+                    <div style={{ marginTop: '0.75rem' }}>
+                      <strong>Rooms</strong>
+                      {selectedLayout.schema.rooms.length ? (
+                        <div className="list" style={{ marginTop: '0.5rem' }}>
+                          {selectedLayout.schema.rooms.map((room) => (
+                            <div key={room.id} className="layout-item">
+                              <div>
+                                <strong>{room.name || room.id}</strong>
+                                <span style={{ marginLeft: 8 }} className="badge">
+                                  {room.type}
+                                </span>
+                              </div>
+                              <div className="muted">Object ID: {room.id}</div>
+                              <div className="muted">Area: {room.estimated_area_sqm ?? 'N/A'} sqm</div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="muted" style={{ marginTop: '0.5rem' }}>
+                          No room labels detected yet.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="muted">Select a layout to inspect extracted metadata.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="hud-column">
+              <InspirePanel
+                layoutId={selectedLayoutId}
+                schema={selectedLayout?.schema ?? null}
+                onStream={async (label, iter) => {
+                  await chatRef.current?.ingestStream(label, iter)
+                }}
+                disabled={busy}
+              />
+              <ChatPanel
+                ref={chatRef}
+                layoutId={selectedLayoutId}
+                onGlbReady={onGlbReady}
+                disabled={busy}
+              />
+              <SchemaEditor
+                schema={selectedLayout?.schema ?? null}
+                onSave={onSaveSchema}
+                onFixPrompt={onFixPrompt}
+                busy={busy}
+              />
+            </div>
           </div>
-
-          <Viewer3D
-            ref={viewerRef}
-            glbUrl={glbUrl}
-            schema={selectedLayout?.schema ?? null}
-            onRoomSelect={setSelectedRoom}
-          />
-        </div>
-
-        <div className="space-y-4">
-          <InspirePanel
-            layoutId={selectedLayoutId}
-            schema={selectedLayout?.schema ?? null}
-            onStream={async (label, iter) => {
-              await chatRef.current?.ingestStream(label, iter)
-            }}
-            disabled={busy}
-          />
-          <ChatPanel
-            ref={chatRef}
-            layoutId={selectedLayoutId}
-            onGlbReady={onGlbReady}
-            disabled={busy}
-          />
-          <RenderPanel
-            viewerRef={viewerRef}
-            schema={selectedLayout?.schema ?? null}
-            selectedRoom={selectedRoom}
-            disabled={busy}
-          />
-          <SchemaEditor
-            schema={selectedLayout?.schema ?? null}
-            onSave={onSaveSchema}
-            onFixPrompt={onFixPrompt}
-            busy={busy}
-          />
-        </div>
+        ) : null}
       </div>
     </div>
   )

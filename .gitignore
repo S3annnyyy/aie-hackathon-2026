@@ -51,3 +51,4 @@ CLAUDE.md
 
 # backend artifacts
 backend/storage
+frontend/tsconfig.tsbuildinfo
