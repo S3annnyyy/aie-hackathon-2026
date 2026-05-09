@@ -1,20 +1,22 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
-import { Map3DView } from '../features/explore/Map3DView'
+import { CompsOverlay } from '../features/explore/CompsOverlay'
+import { Map3DView, type CompMarker } from '../features/explore/Map3DView'
 import { StackPicker } from '../features/explore/StackPicker'
+import type { BenchmarkResponse, BenchmarkTarget } from '../lib/api'
 import { formatSgd, SAMPLE_LISTING } from '../lib/sampleListing'
 import { usePersistentState } from '../lib/usePersistentState'
 
 type Stage = 'await-upload' | 'choices' | 'unit-view'
 
 /**
- * Nudge applied to the unit-view camera so it hovers above the block's
- * courtyard playground (to the east-south-east of 90A Telok Blangah) rather
- * than dead-centre on the roof slab. ~35m on heading 115° lands inside the
- * shared yard between blocks 90A/90B from visual inspection of the tiles.
+ * Nudge applied to the unit-view camera for 70C Telok Blangah Heights so it
+ * sits slightly toward the Telok Blangah Hill Park / Stream Garden side
+ * (south-south-east of the block footprint) rather than dead-centre on the
+ * roof slab. That framing matches the listing's "greenery view" pitch.
  */
-const PLAYGROUND_CAMERA_BIAS = { headingDeg: 115, distanceMeters: 35 }
+const UNIT_CAMERA_BIAS = { headingDeg: 160, distanceMeters: 30 }
 
 export default function ExplorePage() {
   const [stage, setStage] = usePersistentState<Stage>('stackview.explore.stage', 'await-upload')
@@ -87,6 +89,35 @@ function UnitBackdrop({
   const listing = SAMPLE_LISTING
   const pricePerSqm = useMemo(() => Math.round(listing.priceSgd / (listing.areaSqft / 10.764)), [listing])
 
+  const [benchmark, setBenchmark] = useState<BenchmarkResponse | null>(null)
+
+  const benchmarkTarget: BenchmarkTarget = useMemo(
+    () => ({
+      address: listing.address,
+      postal: listing.postal,
+      lat: listing.coordinates.lat,
+      lng: listing.coordinates.lng,
+      flat_type: listing.flatType,
+      floor_area_sqft: listing.areaSqft,
+      price_sgd: listing.priceSgd,
+      psf_sgd: listing.psfSgd,
+    }),
+    [listing],
+  )
+
+  const compMarkers: CompMarker[] = useMemo(() => {
+    if (!benchmark) return []
+    const median = benchmark.benchmark.median_psf_sgd
+    return benchmark.comps
+      .filter((c): c is typeof c & { lat: number; lng: number } => c.lat != null && c.lng != null)
+      .map((c) => {
+        const tone: CompMarker['tone'] =
+          c.psf_sgd && median ? (c.psf_sgd < median * 0.97 ? 'below' : c.psf_sgd > median * 1.03 ? 'above' : 'median') : 'median'
+        const label = c.psf_sgd ? `S$${Math.round(c.psf_sgd)} psf` : c.address.slice(0, 24)
+        return { lat: c.lat, lng: c.lng, label, tone }
+      })
+  }, [benchmark])
+
   return (
     <div className="relative h-[calc(100vh-5rem)] w-full overflow-hidden">
       {/* Full-bleed 3D Maps backdrop. */}
@@ -97,19 +128,21 @@ function UnitBackdrop({
           stackLabel={stackLabel}
           facing={facing}
           mode={stage === 'unit-view' ? 'unit' : 'birdseye'}
-          unitCameraBias={PLAYGROUND_CAMERA_BIAS}
+          unitCameraBias={UNIT_CAMERA_BIAS}
+          compMarkers={compMarkers}
         />
         {/* Light scrims so overlays stay legible without blocking the map. */}
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-espresso/30 via-transparent to-espresso/45" />
       </div>
 
       {/* Details overlay — listing card, left side. */}
-      <div className="pointer-events-auto absolute left-4 top-4 z-10 w-[min(22rem,calc(100vw-2rem))]">
+      <div className="pointer-events-auto absolute left-4 top-4 z-10 flex max-h-[calc(100vh-7rem)] w-[min(24rem,calc(100vw-2rem))] flex-col gap-3 overflow-hidden">
         <ListingOverlayCard
           listing={listing}
           pricePerSqm={pricePerSqm}
           uploadedName={uploadedName}
         />
+        <CompsOverlay target={benchmarkTarget} onCompsLoaded={setBenchmark} />
       </div>
 
       {/* Action pills — right side. */}

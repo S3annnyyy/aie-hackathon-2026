@@ -3,12 +3,13 @@
  * and the Explore page. Shape mirrors a typical public resale listing so we
  * can extend this to user-parsed URLs later without reshaping callers.
  *
- * Source: web-scraped resale listing for 90A Telok Blangah Street 31.
+ * Source: web-scraped resale listing for 70C Telok Blangah Heights (corner
+ * unit, high floor, Telok Blangah Ridgeview, TOP 2016/2017).
  * Coordinates verified against OneMap Singapore (authoritative).
  */
 
 export type FloorStackBand = {
-  readonly label: string // e.g. "13 to 15"
+  readonly label: string // e.g. "16 to 18"
   readonly recentSale?: {
     readonly date: string
     readonly priceSgd: number
@@ -49,45 +50,46 @@ export type ResaleListing = {
 }
 
 export const SAMPLE_LISTING: ResaleListing = {
-  id: '500077059',
-  address: '90A Telok Blangah Street 31',
-  block: '90A',
-  street: 'Telok Blangah Street 31',
-  postal: '101090',
+  id: '500031072',
+  address: '70C Telok Blangah Heights',
+  block: '70C',
+  street: 'Telok Blangah Heights',
+  postal: '103070',
   // OneMap-verified coordinates for the block footprint.
-  coordinates: { lat: 1.2777346, lng: 103.8070933 },
+  coordinates: { lat: 1.2759962, lng: 103.810863 },
   flatType: '4 Room Flat',
   bedrooms: 3,
   bathrooms: 2,
   areaSqft: 1001,
-  priceSgd: 933_000,
-  psfSgd: 932,
-  negotiable: true,
-  topYear: 2018,
+  priceSgd: 979_333,
+  psfSgd: 978,
+  negotiable: false,
+  topYear: 2017,
   leaseYears: 99,
   listedOn: '2026-05-08',
-  listingUrl: 'https://www.propertyguru.com.sg/listing/hdb-for-sale-90a-telok-blangah-street-31-500077059',
-  agent: { name: 'Lin Sallee 林玥廷', agency: 'HUTTONS ASIA PTE LTD' },
-  facingCandidates: ['North', 'North-East', 'East', 'South-East', 'South'],
-  // This listing has no published transaction history on the source page, so
-  // we seed plausible stack bands for a typical ~40-storey Telok Blangah block
-  // to keep the stack picker meaningful for the demo.
+  listingUrl:
+    'https://www.propertyguru.com.sg/listing/hdb-for-sale-70c-telok-blangah-heights-500031072',
+  agent: { name: 'Pius Yap Chih Hong 叶智弘', agency: 'ERA REALTY NETWORK PTE LTD' },
+  // Listing copy: "Quiet and peaceful facing, greenery view" — corner unit
+  // looking over the Telok Blangah Hill Park side.
+  facingCandidates: ['North', 'North-East', 'East', 'South-East', 'South', 'South-West', 'West'],
+  // Real transaction history from the source page.
   floorStack: [
-    { label: '07 to 09' },
-    { label: '13 to 15' },
-    { label: '19 to 21' },
-    { label: '25 to 27' },
-    { label: '31 to 33' },
+    { label: '13 to 15', recentSale: { date: 'Aug 2025', priceSgd: 970_000, psfSgd: 969 } },
+    { label: '16 to 18', recentSale: { date: 'Mar 2026', priceSgd: 1_060_000, psfSgd: 1059 } },
+    { label: '19 to 21', recentSale: { date: 'Apr 2025', priceSgd: 1_000_000, psfSgd: 999 } },
+    { label: '22 to 24', recentSale: { date: 'Apr 2025', priceSgd: 1_010_000, psfSgd: 1008 } },
   ],
   nearestTransit: [
-    { code: 'CC28', name: 'Telok Blangah MRT', walkMinutes: 8, distanceMeters: 670 },
-    { code: 'CC27', name: 'Labrador Park MRT', walkMinutes: 11, distanceMeters: 880 },
+    { code: 'CC28', name: 'Telok Blangah MRT', walkMinutes: 10, distanceMeters: 830 },
+    { code: 'CC27', name: 'Labrador Park MRT', walkMinutes: 14, distanceMeters: 1100 },
+    { code: 'NE1', name: 'HarbourFront MRT', walkMinutes: 16, distanceMeters: 1300 },
   ],
   highlights: [
-    'Minutes to Telok Blangah MRT (Circle Line) and HarbourFront',
-    'Close to Mount Faber Park, Southern Ridges, VivoCity',
-    'Greater Southern Waterfront upside potential',
-    'TOP Dec 2018 · 99-year lease · minimal build-in, ready for renovation',
+    'Corner unit, high floor with greenery view',
+    'TOP 2017 · 99-year lease · 25-storey block',
+    'Stream Garden & Telok Blangah Hill Park at the doorstep',
+    'Blangah Rise Primary · My First Skool · Blangah Rise Kindergarten within 200 m',
   ],
 }
 
