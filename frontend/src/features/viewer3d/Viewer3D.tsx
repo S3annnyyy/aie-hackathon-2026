@@ -55,9 +55,30 @@ const LOOK_SENSITIVITY = 0.0022
 const CAMERA_CLEARANCE = 0.18
 const TRANSITION_SECONDS = 0.9
 const FLOOR_HEIGHT = -0.12
+const WINDOW_SILL_HEIGHT = 0.88
+const OVERVIEW_ROTATION_SPEED = 0.12
+const INITIAL_OVERVIEW_ANGLE = Math.PI / 4
+const OVERVIEW_RADIUS_MULTIPLIER = 0.95 * Math.SQRT2
+const WALL_COLLISION_BUFFER = 0.22
 const WALL_GREY = '#c9c7c1'
 const FLOOR_TONE = '#786d60'
 const FLOOR_TONE_DEEP = '#675b4f'
+
+type Opening = {
+  id: string
+  wall_id?: string | null
+  center: number[]
+  width_m: number
+  height_m: number
+}
+
+type WallCollisionSegment = {
+  horizontal: boolean
+  minAxis: number
+  maxAxis: number
+  coord: number
+  halfThickness: number
+}
 
 class ViewerErrorBoundary extends Component<ViewerErrorBoundaryProps, ViewerErrorBoundaryState> {
   state: ViewerErrorBoundaryState = { hasError: false }
@@ -295,8 +316,20 @@ function FloorPlane({ bounds }: { bounds: Bounds }) {
 }
 
 function chooseOverviewPosition(bounds: Bounds): THREE.Vector3 {
+  return getOverviewOrbitPose(bounds, INITIAL_OVERVIEW_ANGLE).position
+}
+
+function getOverviewOrbitPose(bounds: Bounds, angle: number) {
   const span = Math.max(bounds.width, bounds.depth)
-  return new THREE.Vector3(bounds.centerX + span * 0.95, Math.max(4.5, span * 0.9), bounds.centerZ + span * 0.95)
+  const radius = Math.max(span * OVERVIEW_RADIUS_MULTIPLIER, 5)
+  const height = Math.max(4.5, span * 0.9)
+  const lookAt = new THREE.Vector3(bounds.centerX, 0.6, bounds.centerZ)
+  const position = new THREE.Vector3(
+    lookAt.x + Math.cos(angle) * radius,
+    height,
+    lookAt.z + Math.sin(angle) * radius,
+  )
+  return { position, lookAt, radius, height }
 }
 
 function chooseRoomEntry(room: Room, ppm: number, overviewPosition: THREE.Vector3, bounds: Bounds): THREE.Vector3 {
@@ -363,6 +396,43 @@ function classifyInteriorSurface(mesh: THREE.Mesh) {
   }
 
   return 'other' as const
+}
+
+function buildWallCollisionSegments(walls: Wall[], ppm: number): WallCollisionSegment[] {
+  return walls.map((wall) => {
+    const start = toWorldPoint(wall.start, ppm)
+    const end = toWorldPoint(wall.end, ppm)
+    const horizontal = Math.abs(end.x - start.x) >= Math.abs(end.z - start.z)
+    return {
+      horizontal,
+      minAxis: horizontal ? Math.min(start.x, end.x) : Math.min(start.z, end.z),
+      maxAxis: horizontal ? Math.max(start.x, end.x) : Math.max(start.z, end.z),
+      coord: horizontal ? (start.z + end.z) / 2 : (start.x + end.x) / 2,
+      halfThickness: Math.max(0.05, wall.thickness_m / 2) + WALL_COLLISION_BUFFER,
+    }
+  })
+}
+
+function pointHitsWall(point: WorldPoint, wall: WallCollisionSegment) {
+  if (wall.horizontal) {
+    return (
+      point.z >= wall.coord - wall.halfThickness &&
+      point.z <= wall.coord + wall.halfThickness &&
+      point.x >= wall.minAxis - WALL_COLLISION_BUFFER &&
+      point.x <= wall.maxAxis + WALL_COLLISION_BUFFER
+    )
+  }
+
+  return (
+    point.x >= wall.coord - wall.halfThickness &&
+    point.x <= wall.coord + wall.halfThickness &&
+    point.z >= wall.minAxis - WALL_COLLISION_BUFFER &&
+    point.z <= wall.maxAxis + WALL_COLLISION_BUFFER
+  )
+}
+
+function collidesWithWalls(point: WorldPoint, walls: WallCollisionSegment[]) {
+  return walls.some((wall) => pointHitsWall(point, wall))
 }
 
 function styleMaterialForInterior(material: THREE.Material, kind: 'floor' | 'wall' | 'other') {
@@ -453,17 +523,139 @@ function WallOverlay({ walls, ppm }: { walls: Wall[]; ppm: number }) {
   )
 }
 
+function WindowOverlay({ windows, walls, ppm }: { windows: Opening[]; walls: Wall[]; ppm: number }) {
+  if (!windows.length || !walls.length) return null
+
+  const wallById = new Map(walls.map((wall) => [wall.id, wall]))
+
+  const resolveWall = (opening: Opening) => {
+    if (opening.wall_id && wallById.has(opening.wall_id)) {
+      return wallById.get(opening.wall_id) ?? null
+    }
+
+    const center = toWorldPoint(opening.center, ppm)
+    let bestWall: Wall | null = null
+    let bestDistance = Number.POSITIVE_INFINITY
+    for (const wall of walls) {
+      const start = toWorldPoint(wall.start, ppm)
+      const end = toWorldPoint(wall.end, ppm)
+      const distance = distancePointToSegmentSquared(center, start, end)
+      if (distance < bestDistance) {
+        bestDistance = distance
+        bestWall = wall
+      }
+    }
+    return bestWall
+  }
+
+  return (
+    <group>
+      {windows.map((opening) => {
+        const wall = resolveWall(opening)
+        if (!wall) return null
+
+        const start = toWorldPoint(wall.start, ppm)
+        const end = toWorldPoint(wall.end, ppm)
+        const center = toWorldPoint(opening.center, ppm)
+        const angle = Math.atan2(end.z - start.z, end.x - start.x)
+        const width = Math.max(0.18, opening.width_m)
+        const height = Math.max(0.28, opening.height_m)
+        const depth = Math.max(0.03, wall.thickness_m * 0.86)
+        const sillHeight = WINDOW_SILL_HEIGHT
+        const y = FLOOR_HEIGHT + sillHeight + height / 2
+
+        return (
+          <group key={opening.id} position={[center.x, y, center.z]} rotation={[0, -angle, 0]}>
+            <mesh castShadow receiveShadow>
+              <boxGeometry args={[width * 1.12, height * 1.12, depth]} />
+              <meshStandardMaterial
+                color="#8b9095"
+                roughness={0.82}
+                metalness={0}
+                side={THREE.DoubleSide}
+                polygonOffset
+                polygonOffsetFactor={2}
+                polygonOffsetUnits={2}
+              />
+            </mesh>
+            <mesh castShadow receiveShadow position={[0, 0, 0.001]}>
+              <boxGeometry args={[width * 0.82, height * 0.82, Math.max(0.012, depth * 0.22)]} />
+              <meshPhysicalMaterial
+                color="#d9e3eb"
+                roughness={0.06}
+                metalness={0}
+                transmission={0.75}
+                transparent
+                opacity={0.2}
+                ior={1.45}
+                thickness={0.03}
+                clearcoat={0.55}
+                clearcoatRoughness={0.12}
+                side={THREE.DoubleSide}
+                depthWrite={false}
+              />
+            </mesh>
+            <mesh castShadow receiveShadow position={[0, 0, depth * 0.36]}>
+              <boxGeometry args={[Math.max(0.03, width * 0.05), height * 0.92, depth * 0.16]} />
+              <meshStandardMaterial color="#6f7478" roughness={0.95} metalness={0} side={THREE.DoubleSide} />
+            </mesh>
+            <mesh castShadow receiveShadow position={[0, 0, -depth * 0.36]}>
+              <boxGeometry args={[Math.max(0.03, width * 0.05), height * 0.92, depth * 0.16]} />
+              <meshStandardMaterial color="#6f7478" roughness={0.95} metalness={0} side={THREE.DoubleSide} />
+            </mesh>
+            <mesh castShadow receiveShadow position={[0, 0, 0]}>
+              <boxGeometry args={[width * 1.08, Math.max(0.03, height * 0.05), depth * 0.16]} />
+              <meshStandardMaterial color="#6f7478" roughness={0.95} metalness={0} side={THREE.DoubleSide} />
+            </mesh>
+          </group>
+        )
+      })}
+    </group>
+  )
+}
+
 function resolveMovement(
   current: THREE.Vector3,
   candidate: THREE.Vector3,
   bounds: Bounds,
+  wallSegments: WallCollisionSegment[],
 ) {
   const margin = CAMERA_CLEARANCE
-  return new THREE.Vector3(
+  const isValid = (point: THREE.Vector3) =>
+    point.x >= bounds.minX + margin &&
+    point.x <= bounds.maxX - margin &&
+    point.z >= bounds.minZ + margin &&
+    point.z <= bounds.maxZ - margin &&
+    !collidesWithWalls({ x: point.x, z: point.z }, wallSegments)
+
+  const direct = new THREE.Vector3(
     clamp(candidate.x, bounds.minX + margin, bounds.maxX - margin),
     EYE_HEIGHT,
     clamp(candidate.z, bounds.minZ + margin, bounds.maxZ - margin),
   )
+  if (isValid(direct)) {
+    return direct
+  }
+
+  const xOnly = new THREE.Vector3(
+    clamp(candidate.x, bounds.minX + margin, bounds.maxX - margin),
+    EYE_HEIGHT,
+    current.z,
+  )
+  if (isValid(xOnly)) {
+    return xOnly
+  }
+
+  const zOnly = new THREE.Vector3(
+    current.x,
+    EYE_HEIGHT,
+    clamp(candidate.z, bounds.minZ + margin, bounds.maxZ - margin),
+  )
+  if (isValid(zOnly)) {
+    return zOnly
+  }
+
+  return current.clone()
 }
 
 function AlignedGlbModel({ url, anchor }: { url: string; anchor: THREE.Vector3 }) {
@@ -597,6 +789,7 @@ type SceneRigProps = {
   overviewPosition: THREE.Vector3
   overviewLookAt: THREE.Vector3
   bounds: Bounds
+  wallSegments: WallCollisionSegment[]
   onTransitionComplete: () => void
   onPointerLockChange: (locked: boolean) => void
   onPoseChange: (position: THREE.Vector3, lookAt: THREE.Vector3) => void
@@ -609,17 +802,21 @@ function SceneRig({
   overviewPosition,
   overviewLookAt,
   bounds,
+  wallSegments,
   onTransitionComplete,
   onPointerLockChange,
   onPoseChange,
   pointerLockTarget,
 }: SceneRigProps) {
-  const { camera, gl } = useThree()
+  const { camera, gl, size } = useThree()
   const keyState = useRef<Record<string, boolean>>({})
   const pointerDelta = useRef({ x: 0, y: 0 })
+  const pointerScreen = useRef<{ x: number; y: number } | null>(null)
   const currentYawPitch = useRef({ yaw: 0, pitch: 0 })
   const currentTarget = useRef(overviewLookAt.clone())
   const transitionComplete = useRef(false)
+  const overviewAngle = useRef(Math.atan2(overviewPosition.z - overviewLookAt.z, overviewPosition.x - overviewLookAt.x))
+  const overviewPause = useRef(false)
 
   useEffect(() => {
     pointerLockTarget.current = gl.domElement
@@ -646,11 +843,22 @@ function SceneRig({
       pointerDelta.current.y += event.movementY
     }
 
+    const onScreenPointerMove = (event: MouseEvent) => {
+      if (document.pointerLockElement === gl.domElement) return
+      pointerScreen.current = { x: event.clientX, y: event.clientY }
+    }
+
+    const onWindowBlur = () => {
+      pointerScreen.current = null
+    }
+
     window.addEventListener('pointerlockchange', onPointerLock)
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
     window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mousemove', onScreenPointerMove)
     window.addEventListener('blur', onBlur)
+    window.addEventListener('blur', onWindowBlur)
 
     onPointerLock()
 
@@ -659,19 +867,22 @@ function SceneRig({
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
       window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mousemove', onScreenPointerMove)
       window.removeEventListener('blur', onBlur)
+      window.removeEventListener('blur', onWindowBlur)
     }
   }, [gl.domElement, onPointerLockChange, pointerLockTarget])
 
   useEffect(() => {
     if (mode === 'overview') {
-      camera.position.copy(overviewPosition)
+      const orbit = getOverviewOrbitPose(bounds, overviewAngle.current)
+      camera.position.copy(orbit.position)
       currentTarget.current = overviewLookAt.clone()
       camera.lookAt(overviewLookAt)
       currentYawPitch.current = roomHeading(camera.position, overviewLookAt)
       onPoseChange(camera.position, currentTarget.current)
     }
-  }, [camera, mode, onPoseChange, overviewLookAt, overviewPosition])
+  }, [camera, mode, onPoseChange, overviewLookAt, overviewPosition, bounds])
 
   useEffect(() => {
     if (!transition) return
@@ -695,6 +906,53 @@ function SceneRig({
         transitionComplete.current = true
         onTransitionComplete()
       }
+      return
+    }
+
+    if (mode === 'overview') {
+      const pointer = pointerScreen.current
+      const canvasRect = gl.domElement.getBoundingClientRect()
+      const target = overviewLookAt.clone()
+      const projected = target.project(camera)
+      const targetScreen = {
+        x: (projected.x * 0.5 + 0.5) * size.width,
+        y: (-projected.y * 0.5 + 0.5) * size.height,
+      }
+      const pointerInsideCanvas =
+        pointer !== null &&
+        pointer.x >= canvasRect.left &&
+        pointer.x <= canvasRect.right &&
+        pointer.y >= canvasRect.top &&
+        pointer.y <= canvasRect.bottom
+
+      if (!pointerInsideCanvas) {
+        overviewPause.current = false
+      } else {
+        const distanceToTarget = Math.hypot(pointer.x - targetScreen.x, pointer.y - targetScreen.y)
+        const modelRadiusWorld = Math.max(bounds.width, bounds.depth) * 0.34
+        const cameraDistance = Math.max(camera.position.distanceTo(target), 0.001)
+        const perspectiveCamera = camera as THREE.PerspectiveCamera
+        const projectedRadius =
+          (modelRadiusWorld * size.height) /
+          (2 * cameraDistance * Math.tan(THREE.MathUtils.degToRad(perspectiveCamera.fov) / 2))
+        const stopThreshold = clamp(projectedRadius + 60, 110, 260)
+        const resumeThreshold = stopThreshold + 40
+        if (distanceToTarget <= stopThreshold) {
+          overviewPause.current = true
+        } else if (distanceToTarget >= resumeThreshold) {
+          overviewPause.current = false
+        }
+      }
+
+      if (!overviewPause.current) {
+        overviewAngle.current += delta * OVERVIEW_ROTATION_SPEED
+      }
+      const orbit = getOverviewOrbitPose(bounds, overviewAngle.current)
+      camera.position.copy(orbit.position)
+      currentTarget.current.copy(overviewLookAt)
+      camera.lookAt(currentTarget.current)
+      currentYawPitch.current = roomHeading(camera.position, currentTarget.current)
+      onPoseChange(camera.position, currentTarget.current)
       return
     }
 
@@ -725,7 +983,7 @@ function SceneRig({
     if (movement.lengthSq() > 0) {
       movement.normalize().multiplyScalar(speed * delta)
       const candidate = camera.position.clone().add(movement)
-      const resolved = resolveMovement(camera.position, candidate, bounds)
+      const resolved = resolveMovement(camera.position, candidate, bounds, wallSegments)
       camera.position.copy(resolved)
     }
 
@@ -757,6 +1015,7 @@ export function Viewer3D({ glbUrl, schema }: Props) {
 
   const ppm = schema?.scale.pixels_per_meter ?? 100
   const bounds = useMemo(() => computeBounds(schema, ppm), [schema, ppm])
+  const wallSegments = useMemo(() => buildWallCollisionSegments(schema?.walls ?? [], ppm), [schema?.walls, ppm])
   const overviewPosition = useMemo(() => chooseOverviewPosition(bounds), [bounds])
   const overviewLookAt = useMemo(() => new THREE.Vector3(bounds.centerX, 0.6, bounds.centerZ), [bounds])
   const sceneAnchor = useMemo(() => new THREE.Vector3(bounds.centerX, 0, bounds.centerZ), [bounds])
@@ -793,11 +1052,12 @@ export function Viewer3D({ glbUrl, schema }: Props) {
 
   const enterWalkthrough = (room: Room) => {
     const canvas = pointerLockTarget.current
-    const overviewCam = new THREE.Vector3(overviewPosition.x, overviewPosition.y, overviewPosition.z)
+    const overviewCam = currentPoseRef.current.position.clone()
+    const overviewLook = currentPoseRef.current.lookAt.clone()
     const entryPosition = chooseRoomEntry(room, ppm, overviewCam, bounds)
     const focusPoint = room.polygon.length >= 3 ? polygonCentroid(room.polygon, ppm) : averagePoint(room.polygon, ppm)
     const toLookAt = new THREE.Vector3(focusPoint.x, EYE_HEIGHT, focusPoint.z)
-    const fromLookAt = new THREE.Vector3(bounds.centerX, 0.6, bounds.centerZ)
+    const fromLookAt = overviewLook
 
     setSelectedRoomId(room.id)
     setTransition({
@@ -877,6 +1137,7 @@ export function Viewer3D({ glbUrl, schema }: Props) {
             overviewPosition={overviewPosition}
             overviewLookAt={overviewLookAt}
             bounds={bounds}
+            wallSegments={wallSegments}
             onTransitionComplete={() => {
               setMode(transition?.targetMode ?? 'overview')
               setTransition(null)
@@ -894,15 +1155,16 @@ export function Viewer3D({ glbUrl, schema }: Props) {
             pointerLockTarget={pointerLockTarget}
           />
           <Suspense fallback={null}>
-            <SceneModel
-              glbUrl={glbUrl}
-              anchor={sceneAnchor}
-              onLoadError={(message) => {
-                setModelError(message)
-              }}
-            />
+          <SceneModel
+            glbUrl={glbUrl}
+            anchor={sceneAnchor}
+            onLoadError={(message) => {
+              setModelError(message)
+            }}
+          />
           </Suspense>
           <WallOverlay walls={schema?.walls ?? []} ppm={ppm} />
+          <WindowOverlay windows={(schema?.windows as Opening[]) ?? []} walls={schema?.walls ?? []} ppm={ppm} />
           {rooms.map(({ room, centroid }) => (
             <RoomMarker
               key={room.id}
