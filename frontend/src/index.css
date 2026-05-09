@@ -166,6 +166,21 @@ textarea {
   justify-content: flex-end;
 }
 
+.viewer-actions button {
+  background: var(--panel-strong);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 0.68rem 0.92rem;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
+  color: var(--text);
+}
+
+.viewer-actions button:hover:not(:disabled) {
+  border-color: rgba(122, 214, 204, 0.38);
+  background: rgba(14, 18, 24, 0.96);
+}
+
 .viewer-hint {
   position: absolute;
   left: 50%;
@@ -373,6 +388,28 @@ textarea {
   display: grid;
   gap: 1rem;
   padding-right: 0.15rem;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(122, 214, 204, 0.45) rgba(255, 255, 255, 0.05);
+  scrollbar-gutter: stable;
+}
+
+.hud-column::-webkit-scrollbar {
+  width: 8px;
+}
+
+.hud-column::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 999px;
+}
+
+.hud-column::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(122, 214, 204, 0.58), rgba(84, 183, 172, 0.38));
+  border-radius: 999px;
+  border: 2px solid rgba(10, 14, 20, 0.92);
+}
+
+.hud-column::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(122, 214, 204, 0.76), rgba(84, 183, 172, 0.56));
 }
 
 .card {
