@@ -39,6 +39,7 @@ type WindowPortal = {
   id: string
   position: THREE.Vector3
   width: number
+  height: number
   inferred: boolean
 }
 
@@ -72,6 +73,8 @@ const FLOOR_HEIGHT = -0.12
 const WALL_GREY = '#c9c7c1'
 const FLOOR_TONE = '#786d60'
 const FLOOR_TONE_DEEP = '#675b4f'
+const MIN_WIND_ARROW_LENGTH = 1.6
+const MAX_WIND_ARROW_LENGTH = 5.2
 
 class ViewerErrorBoundary extends Component<ViewerErrorBoundaryProps, ViewerErrorBoundaryState> {
   state: ViewerErrorBoundaryState = { hasError: false }
@@ -105,13 +108,24 @@ function clamp(value: number, min: number, max: number) {
 
 const DIRS_16 = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
 
-function windDirLabel(deg: number) {
+function compassDirLabel(deg: number) {
   return DIRS_16[Math.round(deg / 22.5) % 16]
+}
+
+function normalizeDegrees(deg: number) {
+  return ((deg % 360) + 360) % 360
+}
+
+function lerpCompassDegrees(from: number, to: number, t: number) {
+  const delta = ((to - from + 540) % 360) - 180
+  return normalizeDegrees(from + delta * t)
 }
 
 function compassVector(deg: number): THREE.Vector3 {
   const rad = (deg * Math.PI) / 180
-  return new THREE.Vector3(Math.sin(rad), 0, Math.cos(rad)).normalize()
+  // Layout images use y-down coordinates, which map to +Z in the scene.
+  // Real-world north should therefore point toward -Z when viewed from above.
+  return new THREE.Vector3(Math.sin(rad), 0, -Math.cos(rad)).normalize()
 }
 
 function formatLocalTime(value: string): string {
@@ -146,7 +160,7 @@ function interpolateSolarSample(samples: SolarSample[], index: number): SunMomen
 
   return {
     time: t < 0.5 ? lower.time : upper.time,
-    solar_azimuth: THREE.MathUtils.lerp(lower.solar_azimuth, upper.solar_azimuth, t),
+    solar_azimuth: lerpCompassDegrees(lower.solar_azimuth, upper.solar_azimuth, t),
     solar_elevation: THREE.MathUtils.lerp(lower.solar_elevation, upper.solar_elevation, t),
   }
 }
@@ -158,6 +172,7 @@ function openingToPortal(opening: Opening, ppm: number): WindowPortal | null {
     id: opening.id,
     position: new THREE.Vector3(center.x, 1.15, center.z),
     width: Math.max(opening.width_m || 1.1, 0.75),
+    height: Math.max(opening.height_m || 1.2, 0.75),
     inferred: false,
   }
 }
@@ -176,6 +191,7 @@ function inferSunEdgePortals(bounds: Bounds, sunFlat: THREE.Vector3): WindowPort
     id: `inferred-window-${index}`,
     position: edgeCenter.clone().add(across.clone().multiplyScalar(offset * spread)).setY(1.15),
     width: 1.15,
+    height: 1.2,
     inferred: true,
   }))
 }
@@ -190,6 +206,14 @@ function getSunFacingPortals(schema: LayoutSchema | null, ppm: number, bounds: B
 
   const facing = portals.filter((portal) => portal.position.clone().sub(center).dot(sunFlat) >= -0.15)
   return facing.length ? facing : portals
+}
+
+function clampVectorToBounds(point: THREE.Vector3, bounds: Bounds, margin = 0.25): THREE.Vector3 {
+  return new THREE.Vector3(
+    clamp(point.x, bounds.minX + margin, bounds.maxX - margin),
+    point.y,
+    clamp(point.z, bounds.minZ + margin, bounds.maxZ - margin),
+  )
 }
 
 function distancePointToSegmentSquared(point: WorldPoint, start: WorldPoint, end: WorldPoint): number {
@@ -694,6 +718,61 @@ function SceneModel({
   )
 }
 
+function SunDirectionalLight({
+  color,
+  intensity,
+  position,
+  target,
+  castShadow,
+}: {
+  color: string
+  intensity: number
+  position: THREE.Vector3
+  target: THREE.Vector3
+  castShadow: boolean
+}) {
+  const lightRef = useRef<THREE.DirectionalLight>(null)
+  const targetRef = useRef(new THREE.Object3D())
+  const { scene } = useThree()
+
+  useEffect(() => {
+    const targetObject = targetRef.current
+    scene.add(targetObject)
+    return () => {
+      scene.remove(targetObject)
+    }
+  }, [scene])
+
+  useEffect(() => {
+    const targetObject = targetRef.current
+    targetObject.position.copy(target)
+    if (lightRef.current) {
+      lightRef.current.target = targetObject
+      lightRef.current.target.updateMatrixWorld()
+    }
+  }, [target])
+
+  return (
+    <directionalLight
+      ref={lightRef}
+      position={[position.x, position.y, position.z]}
+      intensity={intensity}
+      color={color}
+      castShadow={castShadow}
+      shadow-mapSize-width={2048}
+      shadow-mapSize-height={2048}
+      shadow-camera-near={0.1}
+      shadow-camera-far={160}
+      shadow-camera-left={-24}
+      shadow-camera-right={24}
+      shadow-camera-top={24}
+      shadow-camera-bottom={-24}
+      shadow-bias={-0.00025}
+      shadow-normalBias={0.035}
+    />
+  )
+}
+
 function EnvironmentSceneOverlay({
   env,
   schema,
@@ -709,10 +788,22 @@ function EnvironmentSceneOverlay({
 }) {
   const center = useMemo(() => new THREE.Vector3(bounds.centerX, 0, bounds.centerZ), [bounds.centerX, bounds.centerZ])
   const radius = Math.max(Math.hypot(bounds.width, bounds.depth) / 2 + 1.2, 3.5)
-  const windTo = useMemo(() => compassVector(env.wind_direction + 180), [env.wind_direction])
+  const windFrom = useMemo(() => compassVector(env.wind_direction), [env.wind_direction])
+  const windTo = useMemo(() => windFrom.clone().negate(), [windFrom])
   const windAcross = useMemo(() => new THREE.Vector3(-windTo.z, 0, windTo.x).normalize(), [windTo])
   const windStart = center.clone().sub(windTo.clone().multiplyScalar(radius * 0.9))
   const windOffsets = [-0.36, 0, 0.36].map((factor) => factor * Math.max(bounds.width, bounds.depth, 3))
+  const windArrowLength = THREE.MathUtils.clamp(env.wind_speed * 0.16 + MIN_WIND_ARROW_LENGTH, MIN_WIND_ARROW_LENGTH, Math.min(MAX_WIND_ARROW_LENGTH, radius * 1.05))
+  const windTowardLabel = compassDirLabel(env.wind_direction + 180)
+  const compassLabels = useMemo(
+    () => [
+      { label: 'N', direction: compassVector(0) },
+      { label: 'E', direction: compassVector(90) },
+      { label: 'S', direction: compassVector(180) },
+      { label: 'W', direction: compassVector(270) },
+    ],
+    [],
+  )
 
   const solarElevation = Math.max(sunMoment.solar_elevation, 3)
   const solarElevationRad = (solarElevation * Math.PI) / 180
@@ -725,17 +816,18 @@ function EnvironmentSceneOverlay({
   const sunOrigin = center.clone().add(sunVector.clone().multiplyScalar(radius * 1.35))
   const sunRayDirection = sunVector.clone().negate()
   const sunAcross = new THREE.Vector3(-sunRayDirection.z, 0, sunRayDirection.x).normalize()
+  const sunFloorDirection = new THREE.Vector3(sunRayDirection.x, 0, sunRayDirection.z).normalize()
   const sunPortals = useMemo(() => getSunFacingPortals(schema, ppm, bounds, sunFlat), [schema, ppm, bounds, sunFlat])
   const beamLength = radius * 1.35
   const beamOpacity = THREE.MathUtils.clamp(sunMoment.solar_elevation / 55, 0.14, 0.5)
-  const patchLength = Math.max(1.2, Math.min(beamLength * Math.cos(solarElevationRad), radius * 1.25))
   const isNight = sunMoment.solar_elevation <= 0
   const sunTimeLabel = formatLocalTime(sunMoment.time)
 
   return (
     <group>
-      <directionalLight
-        position={[sunOrigin.x, sunOrigin.y + 2, sunOrigin.z]}
+      <SunDirectionalLight
+        position={sunOrigin.clone().setY(sunOrigin.y + 2)}
+        target={center}
         intensity={isNight ? 0.12 : 1.35}
         color={isNight ? '#9ca3af' : '#ffd166'}
         castShadow={!isNight}
@@ -744,18 +836,29 @@ function EnvironmentSceneOverlay({
         <ringGeometry args={[radius * 0.98, radius, 96]} />
         <meshBasicMaterial color="#7ad6cc" transparent opacity={0.2} side={THREE.DoubleSide} />
       </mesh>
-      <Html position={[center.x, 0.24, center.z + radius]} center distanceFactor={9} style={{ pointerEvents: 'none' }}>
-        <div className="scene-factor-label">N</div>
-      </Html>
+      {compassLabels.map(({ label, direction }) => (
+        <Html
+          key={label}
+          position={[center.x + direction.x * radius, 0.24, center.z + direction.z * radius]}
+          center
+          distanceFactor={9}
+          style={{ pointerEvents: 'none' }}
+        >
+          <div className="scene-factor-label">{label}</div>
+        </Html>
+      ))}
 
       {!isNight && sunPortals.map((portal) => {
         const beamStart = portal.position.clone().add(sunRayDirection.clone().multiplyScalar(-0.25))
-        const patchCenter = portal.position.clone().add(sunRayDirection.clone().multiplyScalar(patchLength * 0.5)).setY(0.08)
+        const floorRun = THREE.MathUtils.clamp(portal.position.y / Math.tan(solarElevationRad), 0.45, radius * 1.1)
+        const patchLength = THREE.MathUtils.clamp(portal.height / Math.tan(solarElevationRad), 0.8, radius * 0.9)
+        const rawPatchCenter = portal.position.clone().add(sunFloorDirection.clone().multiplyScalar(floorRun + patchLength * 0.5)).setY(0.08)
+        const patchCenter = clampVectorToBounds(rawPatchCenter, bounds, 0.35)
         const beamAngle = Math.atan2(sunRayDirection.x, sunRayDirection.z)
         return (
           <group key={portal.id}>
             <mesh position={[portal.position.x, portal.position.y, portal.position.z]} rotation={[0, beamAngle, 0]}>
-              <boxGeometry args={[portal.width, 0.8, 0.06]} />
+              <boxGeometry args={[portal.width, portal.height, 0.06]} />
               <meshBasicMaterial color={portal.inferred ? '#fcd34d' : '#fde68a'} transparent opacity={0.52} />
             </mesh>
             <arrowHelper args={[sunRayDirection, beamStart, beamLength, '#f59e0b', 0.34, 0.22]} />
@@ -781,13 +884,13 @@ function EnvironmentSceneOverlay({
       <Html position={[sunOrigin.x, sunOrigin.y + 0.4, sunOrigin.z]} center distanceFactor={9} style={{ pointerEvents: 'none' }}>
         <div className="scene-factor-label">
           <strong>{isNight ? 'No direct sun' : 'Shadow sim'}</strong>
-          <span>{sunTimeLabel} · {sunMoment.solar_elevation.toFixed(0)} deg</span>
+          <span>{sunTimeLabel} - sun from {compassDirLabel(sunMoment.solar_azimuth)}, {sunMoment.solar_elevation.toFixed(0)} deg high</span>
         </div>
       </Html>
 
       {windOffsets.map((offset, index) => {
         const origin = windStart.clone().add(windAcross.clone().multiplyScalar(offset)).setY(0.7 + index * 0.12)
-        return <arrowHelper key={offset} args={[windTo, origin, radius * 0.9, '#38bdf8', 0.35, 0.22]} />
+        return <arrowHelper key={offset} args={[windTo, origin, windArrowLength, '#38bdf8', 0.35, 0.22]} />
       })}
       <Html
         position={[center.x + windTo.x * radius * 0.75, 1.15, center.z + windTo.z * radius * 0.75]}
@@ -797,7 +900,7 @@ function EnvironmentSceneOverlay({
       >
         <div className="scene-factor-label">
           <strong>Wind</strong>
-          <span>{env.wind_speed.toFixed(1)} km/h from {windDirLabel(env.wind_direction)}</span>
+          <span>{env.wind_speed.toFixed(1)} km/h from {compassDirLabel(env.wind_direction)} toward {windTowardLabel}</span>
         </div>
       </Html>
     </group>
@@ -835,7 +938,7 @@ function SunSimulatorPanel({
           {usesDetectedWindows ? 'Detected windows' : 'Estimated sun-facing edge'} - {sunMoment ? formatLocalTime(sunMoment.time) : '--:--'}
         </span>
         <span className="muted">
-          Wind {environment.wind_speed.toFixed(1)} km/h from {windDirLabel(environment.wind_direction)}
+          Wind {environment.wind_speed.toFixed(1)} km/h from {compassDirLabel(environment.wind_direction)} toward {compassDirLabel(environment.wind_direction + 180)}
         </span>
       </div>
       {samples.length > 0 ? (
@@ -1179,7 +1282,7 @@ export function Viewer3D({ glbUrl, schema, environment }: Props) {
           <hemisphereLight intensity={0.42} color="#f2f0ea" groundColor="#7b7367" />
           <directionalLight
             position={[sceneAnchor.x + bounds.width * 0.45, Math.max(bounds.width, bounds.depth) * 1.8 + 12, sceneAnchor.z + bounds.depth * 0.25]}
-            intensity={1.26}
+            intensity={environment ? 0.36 : 1.26}
             color="#fff6e6"
             castShadow
             shadow-mapSize-width={2048}
