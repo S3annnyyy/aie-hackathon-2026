@@ -90,6 +90,9 @@ const FLOOR_TONE_DEEP = '#675b4f'
 const MIN_WIND_ARROW_LENGTH = 1.6
 const MAX_WIND_ARROW_LENGTH = 5.2
 const DAY_ANIMATION_INDEXES_PER_SECOND = 1.15
+const ROOF_OVERHANG = 0.45
+const ROOF_THICKNESS = 0.1
+const DEFAULT_WALL_HEIGHT = 2.8
 
 type Opening = {
   id: string
@@ -892,15 +895,18 @@ function WallOverlay({ walls, windows, ppm }: { walls: Wall[]; windows: Opening[
                       <boxGeometry args={[frameWidth, opening.height, thickness]} />
                       <meshStandardMaterial color="#b9b8b3" roughness={0.96} metalness={0} side={THREE.DoubleSide} />
                     </mesh>
-                    <mesh castShadow receiveShadow position={[opening.localCenter, sillHeight + opening.height - frameWidth / 2, 0]}>
+                    {/* Top and bottom frame edges: thin enough to cast minimal shadow but
+                        castShadow disabled so they don't darken the sun-shaft on the floor. */}
+                    <mesh receiveShadow position={[opening.localCenter, sillHeight + opening.height - frameWidth / 2, 0]}>
                       <boxGeometry args={[opening.width, frameWidth, frameDepth]} />
                       <meshStandardMaterial color="#8b9095" roughness={0.88} metalness={0} side={THREE.DoubleSide} />
                     </mesh>
-                    <mesh castShadow receiveShadow position={[opening.localCenter, sillHeight + frameWidth / 2, 0]}>
+                    <mesh receiveShadow position={[opening.localCenter, sillHeight + frameWidth / 2, 0]}>
                       <boxGeometry args={[opening.width, frameWidth, frameDepth]} />
                       <meshStandardMaterial color="#8b9095" roughness={0.88} metalness={0} side={THREE.DoubleSide} />
                     </mesh>
-                    <mesh castShadow receiveShadow position={[opening.localCenter, sillHeight + opening.height / 2, 0]}>
+                    {/* Glass pane: castShadow off so sunlight streams through onto the floor. */}
+                    <mesh receiveShadow position={[opening.localCenter, sillHeight + opening.height / 2, 0]}>
                       <boxGeometry args={[opening.width * 0.92, opening.height * 0.88, frameDepth]} />
                       <meshStandardMaterial color="#d9e8f6" roughness={0.08} metalness={0} transparent opacity={0.48} emissive="#f2f8ff" emissiveIntensity={0.16} side={THREE.DoubleSide} depthWrite={false} />
                     </mesh>
@@ -912,6 +918,113 @@ function WallOverlay({ walls, windows, ppm }: { walls: Wall[]; windows: Opening[
         )
       })}
     </group>
+  )
+}
+
+function convexHull(points: WorldPoint[]): WorldPoint[] {
+  // Andrew's monotone chain algorithm. Returns hull in CCW order (in x/z plane).
+  if (points.length <= 1) return points.slice()
+  const sorted = points.slice().sort((a, b) => (a.x === b.x ? a.z - b.z : a.x - b.x))
+  const cross = (o: WorldPoint, a: WorldPoint, b: WorldPoint) =>
+    (a.x - o.x) * (b.z - o.z) - (a.z - o.z) * (b.x - o.x)
+
+  const lower: WorldPoint[] = []
+  for (const p of sorted) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
+      lower.pop()
+    }
+    lower.push(p)
+  }
+  const upper: WorldPoint[] = []
+  for (let i = sorted.length - 1; i >= 0; i -= 1) {
+    const p = sorted[i]
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
+      upper.pop()
+    }
+    upper.push(p)
+  }
+  lower.pop()
+  upper.pop()
+  return lower.concat(upper)
+}
+
+function expandHullOutward(hull: WorldPoint[], offset: number): WorldPoint[] {
+  if (hull.length < 3 || offset <= 0) return hull
+  const cx = hull.reduce((sum, p) => sum + p.x, 0) / hull.length
+  const cz = hull.reduce((sum, p) => sum + p.z, 0) / hull.length
+  return hull.map((p) => {
+    const dx = p.x - cx
+    const dz = p.z - cz
+    const len = Math.hypot(dx, dz)
+    if (len < 1e-6) return p
+    const factor = (len + offset) / len
+    return { x: cx + dx * factor, z: cz + dz * factor }
+  })
+}
+
+function buildRoofShape(
+  walls: Wall[],
+  ppm: number,
+  bounds: Bounds,
+): THREE.Shape {
+  const points: WorldPoint[] = []
+  for (const wall of walls) {
+    points.push(toWorldPoint(wall.start, ppm))
+    points.push(toWorldPoint(wall.end, ppm))
+  }
+
+  const hull = points.length >= 3 ? convexHull(points) : []
+  const outline = hull.length >= 3
+    ? expandHullOutward(hull, ROOF_OVERHANG)
+    : [
+        { x: bounds.minX - ROOF_OVERHANG, z: bounds.minZ - ROOF_OVERHANG },
+        { x: bounds.maxX + ROOF_OVERHANG, z: bounds.minZ - ROOF_OVERHANG },
+        { x: bounds.maxX + ROOF_OVERHANG, z: bounds.maxZ + ROOF_OVERHANG },
+        { x: bounds.minX - ROOF_OVERHANG, z: bounds.maxZ + ROOF_OVERHANG },
+      ]
+
+  // Build a Shape using (worldX, -worldZ); after rotating the mesh by [-PI/2, 0, 0]
+  // the shape lands flat in world XZ at its original orientation.
+  const shape = new THREE.Shape()
+  shape.moveTo(outline[0].x, -outline[0].z)
+  for (let i = 1; i < outline.length; i += 1) {
+    shape.lineTo(outline[i].x, -outline[i].z)
+  }
+  shape.closePath()
+  return shape
+}
+
+function Roof({
+  walls,
+  ppm,
+  bounds,
+  height,
+}: {
+  walls: Wall[]
+  ppm: number
+  bounds: Bounds
+  height: number
+}) {
+  const shape = useMemo(() => buildRoofShape(walls, ppm, bounds), [walls, ppm, bounds])
+
+  return (
+    <mesh
+      castShadow
+      receiveShadow
+      rotation={[-Math.PI / 2, 0, 0]}
+      position={[0, height, 0]}
+    >
+      <extrudeGeometry args={[shape, { depth: ROOF_THICKNESS, bevelEnabled: false }]} />
+      <meshStandardMaterial
+        color="#3a2f25"
+        roughness={0.9}
+        metalness={0}
+        transparent
+        opacity={0.42}
+        side={THREE.DoubleSide}
+        depthWrite={false}
+      />
+    </mesh>
   )
 }
 
@@ -1688,6 +1801,7 @@ export function Viewer3D({ glbUrl, schema, environment }: Props) {
   const [isSunPlaying, setIsSunPlaying] = useState(false)
   const [sunSampleIndex, setSunSampleIndex] = useState(0)
   const [hudDashboardRoot, setHudDashboardRoot] = useState<HTMLElement | null>(null)
+  const [roofVisible, setRoofVisible] = useState(false)
   const sunAnimationFrame = useRef<number | null>(null)
   const pointerLockTarget = useRef<HTMLCanvasElement | null>(null)
   const currentPoseRef = useRef({
@@ -1702,11 +1816,17 @@ export function Viewer3D({ glbUrl, schema, environment }: Props) {
     return isFourRoom ? [...schemaWalls, ...templateWindowWallsForFourRoom(schemaWalls)] : schemaWalls
   }, [isFourRoom, schema?.walls])
   const bounds = useMemo(() => computeBounds(schema, ppm), [schema, ppm])
+  const wallTopHeight = useMemo(() => {
+    const heights = viewerWalls.map((wall) => wall.height_m).filter((h) => Number.isFinite(h) && h > 0)
+    const max = heights.length ? Math.max(...heights) : DEFAULT_WALL_HEIGHT
+    return FLOOR_HEIGHT + Math.max(2.2, max)
+  }, [viewerWalls])
   const wallSegments = useMemo(() => buildWallCollisionSegments(viewerWalls, ppm), [viewerWalls, ppm])
   const overviewPosition = useMemo(() => chooseOverviewPosition(bounds), [bounds])
   const overviewLookAt = useMemo(() => new THREE.Vector3(bounds.centerX, 0.6, bounds.centerZ), [bounds])
   const sceneAnchor = useMemo(() => new THREE.Vector3(bounds.centerX, 0, bounds.centerZ), [bounds])
   const showSchemaWalls = Boolean(!glbUrl || modelError || isFourRoom)
+  const roofAvailable = viewerWalls.length > 0
   const viewerWindows = useMemo(() => {
     const schemaWindows = (schema?.windows ?? []) as Opening[]
     if (isFourRoom) {
@@ -1766,6 +1886,7 @@ export function Viewer3D({ glbUrl, schema, environment }: Props) {
     setTransition(null)
     setModelError(null)
     setPointerLocked(false)
+    setRoofVisible(false)
     currentPoseRef.current = {
       position: overviewPosition.clone(),
       lookAt: overviewLookAt.clone(),
@@ -1928,6 +2049,9 @@ export function Viewer3D({ glbUrl, schema, environment }: Props) {
           {showSchemaWalls ? (
             <WallOverlay walls={viewerWalls} windows={viewerWindows} ppm={ppm} />
           ) : null}
+          {roofAvailable && roofVisible ? (
+            <Roof walls={viewerWalls} ppm={ppm} bounds={bounds} height={wallTopHeight} />
+          ) : null}
           {rooms.map(({ room, centroid }) => (
             <RoomMarker
               key={room.id}
@@ -1961,6 +2085,11 @@ export function Viewer3D({ glbUrl, schema, environment }: Props) {
             {pointerLocked ? <span className="viewer-badge viewer-badge-subtle">Pointer lock active</span> : null}
           </div>
           <div className="viewer-actions">
+            {roofAvailable ? (
+              <button onClick={() => setRoofVisible((value) => !value)}>
+                {roofVisible ? 'Hide roof' : 'Show roof'}
+              </button>
+            ) : null}
             <button onClick={exitWalkthrough}>Exit walkthrough</button>
           </div>
         </div>
