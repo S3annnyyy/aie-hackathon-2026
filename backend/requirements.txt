@@ -15,3 +15,4 @@ numpy>=2.0,<3
 openai>=1.75,<2
 anthropic>=0.40,<1
 google-genai>=0.3,<2
+httpx>=0.28,<1

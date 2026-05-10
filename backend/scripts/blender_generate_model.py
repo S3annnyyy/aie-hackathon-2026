@@ -17,9 +17,15 @@ def clear_scene() -> None:
 def make_material(name: str, rgba: tuple[float, float, float, float]) -> bpy.types.Material:
     mat = bpy.data.materials.new(name=name)
     mat.use_nodes = True
+    mat.blend_method = 'BLEND' if rgba[3] < 1 else 'OPAQUE'
+    if hasattr(mat, 'use_screen_refraction'):
+        mat.use_screen_refraction = rgba[3] < 1
     bsdf = mat.node_tree.nodes.get('Principled BSDF')
     if bsdf:
         bsdf.inputs[0].default_value = rgba
+        alpha_input = bsdf.inputs.get('Alpha')
+        if alpha_input:
+            alpha_input.default_value = rgba[3]
     return mat
 
 
@@ -459,13 +465,128 @@ def add_lights_and_camera(width: float, depth: float) -> None:
     bpy.context.scene.camera = camera
 
 
-def _attach_orphan_windows(windows: list[dict]) -> dict[str, list[dict]]:
+def _distance_point_to_wall(center: tuple[float, float], wall: dict) -> tuple[float, tuple[float, float]]:
+    start = wall.get('start', [0, 0])
+    end = wall.get('end', [0, 0])
+    sx, sy = float(start[0]), float(start[1])
+    ex, ey = float(end[0]), float(end[1])
+    dx, dy = ex - sx, ey - sy
+    length_sq = dx * dx + dy * dy
+    if length_sq <= 1e-8:
+        return math.inf, (sx, sy)
+
+    t = max(0.0, min(1.0, ((center[0] - sx) * dx + (center[1] - sy) * dy) / length_sq))
+    px, py = sx + dx * t, sy + dy * t
+    return math.hypot(center[0] - px, center[1] - py), (px, py)
+
+
+def group_windows_by_wall(windows: list[dict], walls: list[dict]) -> dict[str, list[dict]]:
     grouped: dict[str, list[dict]] = {}
+    wall_ids = {str(wall.get('id')) for wall in walls}
+
     for window in windows:
-        wall_id = window.get('wall_id')
-        if wall_id:
-            grouped.setdefault(str(wall_id), []).append(window)
+        center = window.get('center', [0, 0])
+        if len(center) < 2:
+            continue
+
+        requested_wall_id = str(window.get('wall_id')) if window.get('wall_id') else None
+        if requested_wall_id in wall_ids:
+            grouped.setdefault(requested_wall_id, []).append(window)
+            continue
+
+        window_center = (float(center[0]), float(center[1]))
+        nearest = min(
+            walls,
+            key=lambda wall: _distance_point_to_wall(window_center, wall)[0],
+            default=None,
+        )
+        if nearest is None:
+            continue
+
+        distance, projected = _distance_point_to_wall(window_center, nearest)
+        if distance > 0.45:
+            continue
+
+        snapped = dict(window)
+        snapped['center'] = [projected[0], projected[1]]
+        grouped.setdefault(str(nearest['id']), []).append(snapped)
+
     return grouped
+
+
+def _add_oriented_box(
+    *,
+    name: str,
+    location: tuple[float, float, float],
+    scale: tuple[float, float, float],
+    angle: float,
+    mat: bpy.types.Material,
+) -> bpy.types.Object:
+    bpy.ops.mesh.primitive_cube_add(location=location)
+    obj = bpy.context.active_object
+    obj.name = name
+    obj.scale = scale
+    obj.rotation_euler[2] = angle
+    obj.data.materials.append(mat)
+    return obj
+
+
+def add_window_glass(opening: dict, wall: dict, glass_mat: bpy.types.Material, frame_mat: bpy.types.Material) -> None:
+    center = opening.get('center', [0, 0])
+    if len(center) < 2:
+        return
+
+    start = wall.get('start', [0, 0])
+    end = wall.get('end', [0, 0])
+    sx, sy = float(start[0]), float(start[1])
+    ex, ey = float(end[0]), float(end[1])
+    dx, dy = ex - sx, ey - sy
+    length = math.hypot(dx, dy)
+    if length <= 0.2:
+        return
+
+    wall_height = float(wall.get('height_m', 2.8))
+    window_width = min(max(float(opening.get('width_m', 0.9)), 0.35), max(length - 0.1, 0.35))
+    window_height = min(max(float(opening.get('height_m', 1.2)), 0.65), max(wall_height - 0.65, 0.65))
+    sill_height = min(0.9, max(0.35, wall_height - window_height - 0.25))
+    center_z = sill_height + window_height / 2.0
+    angle = math.atan2(dy, dx)
+
+    distance, projected = _distance_point_to_wall((float(center[0]), float(center[1])), wall)
+    if distance > 0.55:
+        return
+
+    px, py = projected
+    glass = _add_oriented_box(
+        name=f"window::{opening.get('id', 'window')}",
+        location=(px, py, center_z),
+        scale=(window_width / 2.0, 0.018, window_height / 2.0),
+        angle=angle,
+        mat=glass_mat,
+    )
+    glass['opening_id'] = opening.get('id', 'window')
+    glass['wall_id'] = wall.get('id')
+
+    frame_depth = 0.035
+    frame_thick = 0.045
+    dir_x, dir_y = dx / length, dy / length
+    for label, z in (('sill', sill_height), ('head', sill_height + window_height)):
+        _add_oriented_box(
+            name=f"window-frame::{opening.get('id', 'window')}::{label}",
+            location=(px, py, z),
+            scale=(window_width / 2.0 + frame_thick, frame_depth, frame_thick),
+            angle=angle,
+            mat=frame_mat,
+        )
+
+    for label, offset in (('left', -window_width / 2.0), ('right', window_width / 2.0)):
+        _add_oriented_box(
+            name=f"window-frame::{opening.get('id', 'window')}::{label}",
+            location=(px + dir_x * offset, py + dir_y * offset, center_z),
+            scale=(frame_thick, frame_depth, window_height / 2.0 + frame_thick),
+            angle=angle,
+            mat=frame_mat,
+        )
 
 
 def build_scene(payload: dict) -> None:
@@ -478,7 +599,7 @@ def build_scene(payload: dict) -> None:
     raw_walls = payload.get('walls', [])
     walls = normalize_walls(raw_walls, pixels_per_meter)
     windows = normalize_windows(payload.get('windows', []), pixels_per_meter)
-    windows_by_wall = _attach_orphan_windows(windows)
+    windows_by_wall = group_windows_by_wall(windows, walls)
     rooms = payload.get('rooms', [])
     furniture = payload.get('furniture', [])
 
@@ -500,11 +621,16 @@ def build_scene(payload: dict) -> None:
     furniture_fabric_mat = make_material('FurnitureFabric', (0.86, 0.84, 0.8, 1.0))
     furniture_light_mat = make_material('FurnitureLight', (0.95, 0.94, 0.92, 1.0))
     furniture_dark_mat = make_material('FurnitureDark', (0.24, 0.22, 0.2, 1.0))
+    glass_mat = make_material('Sunlit Window Glass', (0.55, 0.84, 1.0, 0.34))
+    frame_mat = make_material('Window Frame', (0.16, 0.18, 0.2, 1.0))
 
     add_floor(width, depth, floor_mat)
 
     for wall in walls:
-        add_wall_with_openings(wall, windows_by_wall.get(str(wall['id']), []), wall_mat)
+        wall_windows = windows_by_wall.get(str(wall['id']), [])
+        add_wall_with_openings(wall, wall_windows, wall_mat)
+        for opening in wall_windows:
+            add_window_glass(opening, wall, glass_mat, frame_mat)
 
     for room in rooms:
         poly = room.get('polygon', [])

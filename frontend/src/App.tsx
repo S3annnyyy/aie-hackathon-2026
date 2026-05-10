@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 
 import { ChatPanel, type ChatPanelHandle } from './features/chat/ChatPanel'
 import { InspirePanel } from './features/chat/InspirePanel'
@@ -10,6 +10,8 @@ import {
   exportDxf,
   fixSchema,
   generateGlb,
+  geocodeAddress,
+  getEnvironment,
   getLayout,
   getLayouts,
   getProject,
@@ -17,6 +19,8 @@ import {
   regenerateExtraction,
   toAssetUrl,
   uploadPdf,
+  type EnvironmentData,
+  type GeocodeResult,
   type LayoutSchema,
   type LayoutSummary,
   type ProjectSummary,
@@ -28,6 +32,11 @@ function cacheBust(url: string | null | undefined) {
   return `${url}${joiner}v=${Date.now()}`
 }
 
+function windLabel(deg: number): string {
+  const dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
+  return dirs[Math.round(deg / 22.5) % 16]
+}
+
 export default function App() {
   const chatRef = useRef<ChatPanelHandle>(null)
   const [hudOpen, setHudOpen] = useState(true)
@@ -37,6 +46,11 @@ export default function App() {
   const [selectedLayoutId, setSelectedLayoutId] = useState<string | null>(null)
   const [glbUrl, setGlbUrl] = useState<string | null>(null)
   const [notice, setNotice] = useState<string>('Upload a brochure PDF to start.')
+  const [locationQuery, setLocationQuery] = useState('')
+  const [geocodeResults, setGeocodeResults] = useState<GeocodeResult[]>([])
+  const [environment, setEnvironment] = useState<EnvironmentData | null>(null)
+  const [envLoading, setEnvLoading] = useState(false)
+  const geocodeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const selectedLayout = useMemo(
     () => layouts.find((layout) => layout.id === selectedLayoutId) ?? null,
@@ -168,9 +182,38 @@ export default function App() {
     }
   }
 
+  const onLocationInput = useCallback((value: string) => {
+    setLocationQuery(value)
+    setGeocodeResults([])
+    if (geocodeTimer.current) clearTimeout(geocodeTimer.current)
+    if (value.trim().length < 3) return
+    geocodeTimer.current = setTimeout(async () => {
+      try {
+        const results = await geocodeAddress(value)
+        setGeocodeResults(results)
+      } catch {
+        /* non-fatal: keep HUD quiet while typing */
+      }
+    }, 500)
+  }, [])
+
+  const onSelectLocation = useCallback(async (result: GeocodeResult) => {
+    setLocationQuery(result.display_name.split(',').slice(0, 2).join(','))
+    setGeocodeResults([])
+    setEnvLoading(true)
+    try {
+      const env = await getEnvironment(result.lat, result.lon)
+      setEnvironment(env)
+    } catch (err) {
+      setNotice(`Environment fetch failed: ${String(err)}`)
+    } finally {
+      setEnvLoading(false)
+    }
+  }, [])
+
   return (
     <div className="app-shell">
-      <Viewer3D glbUrl={glbUrl} schema={selectedLayout?.schema ?? null} />
+      <Viewer3D glbUrl={glbUrl} schema={selectedLayout?.schema ?? null} environment={environment} />
 
       <div className="hud-shell">
         <div className="hud-topbar">
@@ -179,102 +222,141 @@ export default function App() {
         </div>
 
         {hudOpen ? (
-          <div className="hud-columns">
-            <div className="hud-column">
-              <UploadPanel onUpload={onUpload} busy={busy} />
-              <LayoutList layouts={layouts} selectedLayoutId={selectedLayoutId} onSelect={selectLayout} />
-              {project ? (
-                <div className="card">
-                  <h3>Project</h3>
-                  <div className="muted">ID: {project.id}</div>
-                  <div className="muted">Source: {project.source_pdf_name}</div>
-                  <div className="muted">Status: {project.status}</div>
-                </div>
-              ) : null}
-              <div className="card">
-                <h3>Layout Preview</h3>
-                {selectedLayout?.crop_image_url ? (
-                  <img
-                    src={toAssetUrl(selectedLayout.crop_image_url) ?? ''}
-                    alt="floorplan crop"
-                    style={{ width: '100%', borderRadius: 10, border: '1px solid var(--border)' }}
-                  />
-                ) : (
-                  <p className="muted">Select a layout to preview crop.</p>
-                )}
-                <div className="toolbar" style={{ marginTop: '0.75rem' }}>
-                  <button onClick={onRerunExtraction} disabled={!selectedLayoutId || busy}>
-                    Re-extract Schema
-                  </button>
-                  <button onClick={onExportDxf} disabled={!selectedLayoutId || busy}>
-                    Export DXF
-                  </button>
-                  <button onClick={onGenerateGlb} disabled={!selectedLayoutId || busy}>
-                    Generate 3D
-                  </button>
-                </div>
-              </div>
-              <div className="card">
-                <h3>Extracted Metadata</h3>
-                {selectedLayout ? (
-                  <div>
-                    <div className="muted">Flat type: {selectedLayout.flat_type ?? selectedLayout.schema.flat_type ?? 'N/A'}</div>
-                    <div className="muted">
-                      Approx area: {selectedLayout.floor_area_sqm ?? selectedLayout.schema.floor_area_sqm ?? 'N/A'} sqm
-                    </div>
-                    <div style={{ marginTop: '0.75rem' }}>
-                      <strong>Rooms</strong>
-                      {selectedLayout.schema.rooms.length ? (
-                        <div className="list" style={{ marginTop: '0.5rem' }}>
-                          {selectedLayout.schema.rooms.map((room) => (
-                            <div key={room.id} className="layout-item">
-                              <div>
-                                <strong>{room.name || room.id}</strong>
-                                <span style={{ marginLeft: 8 }} className="badge">
-                                  {room.type}
-                                </span>
-                              </div>
-                              <div className="muted">Object ID: {room.id}</div>
-                              <div className="muted">Area: {room.estimated_area_sqm ?? 'N/A'} sqm</div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="muted" style={{ marginTop: '0.5rem' }}>
-                          No room labels detected yet.
-                        </p>
-                      )}
-                    </div>
+          <>
+            <div className="hud-columns">
+              <div className="hud-column">
+                <UploadPanel onUpload={onUpload} busy={busy} />
+                <LayoutList layouts={layouts} selectedLayoutId={selectedLayoutId} onSelect={selectLayout} />
+                {project ? (
+                  <div className="card">
+                    <h3>Project</h3>
+                    <div className="muted">ID: {project.id}</div>
+                    <div className="muted">Source: {project.source_pdf_name}</div>
+                    <div className="muted">Status: {project.status}</div>
                   </div>
-                ) : (
-                  <p className="muted">Select a layout to inspect extracted metadata.</p>
-                )}
+                ) : null}
+                <div className="card">
+                  <h3>Location</h3>
+                  <p className="muted" style={{ marginBottom: '0.5rem' }}>
+                    Search an address to load sun and wind data into the 3D walkthrough.
+                  </p>
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type="text"
+                      placeholder="e.g. Ang Mo Kio, Singapore"
+                      value={locationQuery}
+                      onChange={(event) => onLocationInput(event.target.value)}
+                    />
+                    {geocodeResults.length > 0 ? (
+                      <div className="location-results">
+                        {geocodeResults.map((result, index) => (
+                          <button
+                            key={`${result.lat}-${result.lon}-${index}`}
+                            type="button"
+                            className="location-result"
+                            onClick={() => onSelectLocation(result)}
+                          >
+                            {result.display_name}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                  {envLoading ? <div className="muted" style={{ marginTop: '0.5rem' }}>Fetching weather...</div> : null}
+                  {environment && !envLoading ? (
+                    <div className="environment-readout">
+                      <div className="muted">Wind: {environment.wind_speed.toFixed(1)} km/h from {windLabel(environment.wind_direction)}</div>
+                      <div className="muted">Sun: {environment.solar_elevation.toFixed(0)} deg elevation, {environment.solar_azimuth.toFixed(0)} deg azimuth</div>
+                      <div className="muted" style={{ fontSize: 10 }}>{environment.timestamp.replace('T', ' ')}</div>
+                    </div>
+                  ) : null}
+                </div>
+                <div className="card">
+                  <h3>Layout Preview</h3>
+                  {selectedLayout?.crop_image_url ? (
+                    <img
+                      src={toAssetUrl(selectedLayout.crop_image_url) ?? ''}
+                      alt="floorplan crop"
+                      style={{ width: '100%', borderRadius: 10, border: '1px solid var(--border)' }}
+                    />
+                  ) : (
+                    <p className="muted">Select a layout to preview crop.</p>
+                  )}
+                  <div className="toolbar" style={{ marginTop: '0.75rem' }}>
+                    <button onClick={onRerunExtraction} disabled={!selectedLayoutId || busy}>
+                      Re-extract Schema
+                    </button>
+                    <button onClick={onExportDxf} disabled={!selectedLayoutId || busy}>
+                      Export DXF
+                    </button>
+                    <button onClick={onGenerateGlb} disabled={!selectedLayoutId || busy}>
+                      Generate 3D
+                    </button>
+                  </div>
+                </div>
+                <div className="card">
+                  <h3>Extracted Metadata</h3>
+                  {selectedLayout ? (
+                    <div>
+                      <div className="muted">Flat type: {selectedLayout.flat_type ?? selectedLayout.schema.flat_type ?? 'N/A'}</div>
+                      <div className="muted">
+                        Approx area: {selectedLayout.floor_area_sqm ?? selectedLayout.schema.floor_area_sqm ?? 'N/A'} sqm
+                      </div>
+                      <div style={{ marginTop: '0.75rem' }}>
+                        <strong>Rooms</strong>
+                        {selectedLayout.schema.rooms.length ? (
+                          <div className="list" style={{ marginTop: '0.5rem' }}>
+                            {selectedLayout.schema.rooms.map((room) => (
+                              <div key={room.id} className="layout-item">
+                                <div>
+                                  <strong>{room.name || room.id}</strong>
+                                  <span style={{ marginLeft: 8 }} className="badge">
+                                    {room.type}
+                                  </span>
+                                </div>
+                                <div className="muted">Object ID: {room.id}</div>
+                                <div className="muted">Area: {room.estimated_area_sqm ?? 'N/A'} sqm</div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="muted" style={{ marginTop: '0.5rem' }}>
+                            No room labels detected yet.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="muted">Select a layout to inspect extracted metadata.</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="hud-column">
+                <InspirePanel
+                  layoutId={selectedLayoutId}
+                  schema={selectedLayout?.schema ?? null}
+                  onStream={async (label, iter) => {
+                    await chatRef.current?.ingestStream(label, iter)
+                  }}
+                  disabled={busy}
+                />
+                <ChatPanel
+                  ref={chatRef}
+                  layoutId={selectedLayoutId}
+                  onGlbReady={onGlbReady}
+                  disabled={busy}
+                />
+                <div id="viewer-hud-dashboard-root" className="hud-dashboard-root" />
+                <SchemaEditor
+                  schema={selectedLayout?.schema ?? null}
+                  onSave={onSaveSchema}
+                  onFixPrompt={onFixPrompt}
+                  busy={busy}
+                />
               </div>
             </div>
-
-            <div className="hud-column">
-              <InspirePanel
-                layoutId={selectedLayoutId}
-                schema={selectedLayout?.schema ?? null}
-                onStream={async (label, iter) => {
-                  await chatRef.current?.ingestStream(label, iter)
-                }}
-                disabled={busy}
-              />
-              <ChatPanel
-                ref={chatRef}
-                layoutId={selectedLayoutId}
-                onGlbReady={onGlbReady}
-                disabled={busy}
-              />
-              <SchemaEditor
-                schema={selectedLayout?.schema ?? null}
-                onSave={onSaveSchema}
-                onFixPrompt={onFixPrompt}
-                busy={busy}
-              />
-            </div>
-          </div>
+          </>
         ) : null}
       </div>
     </div>
