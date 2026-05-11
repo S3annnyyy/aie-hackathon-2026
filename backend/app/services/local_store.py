@@ -22,6 +22,22 @@ class LocalLayout:
 
 
 @dataclass
+class LocalSchemaMemoryEntry:
+    id: UUID
+    source_layout_id: UUID
+    flat_type: str | None
+    floor_area_sqm: float | None
+    room_signature: str
+    before_schema_json: dict[str, Any]
+    after_schema_json: dict[str, Any]
+    rules_json: dict[str, Any]
+    summary: str
+    active: bool = True
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    updated_at: datetime = field(default_factory=datetime.utcnow)
+
+
+@dataclass
 class LocalProject:
     id: UUID
     source_pdf_name: str
@@ -38,6 +54,7 @@ class LocalStore:
         self.projects: dict[UUID, LocalProject] = {}
         self.layout_index: dict[UUID, LocalLayout] = {}
         self.project_hash_index: dict[str, UUID] = {}
+        self.schema_memory_entries: dict[UUID, LocalSchemaMemoryEntry] = {}
 
     def create_project(
         self,
@@ -138,6 +155,38 @@ class LocalStore:
         elif artifact_type == 'crop':
             layout.crop_image_url = artifact_url
         return layout
+
+    def create_schema_memory_entry(
+        self,
+        *,
+        source_layout_id: UUID,
+        flat_type: str | None,
+        floor_area_sqm: float | None,
+        room_signature: str,
+        before_schema_json: dict[str, Any],
+        after_schema_json: dict[str, Any],
+        rules_json: dict[str, Any],
+        summary: str,
+    ) -> LocalSchemaMemoryEntry:
+        entry = LocalSchemaMemoryEntry(
+            id=uuid4(),
+            source_layout_id=source_layout_id,
+            flat_type=flat_type,
+            floor_area_sqm=floor_area_sqm,
+            room_signature=room_signature,
+            before_schema_json=before_schema_json,
+            after_schema_json=after_schema_json,
+            rules_json=rules_json,
+            summary=summary,
+        )
+        self.schema_memory_entries[entry.id] = entry
+        return entry
+
+    def list_schema_memory_entries(self, *, active_only: bool = True) -> list[LocalSchemaMemoryEntry]:
+        entries = list(self.schema_memory_entries.values())
+        if active_only:
+            entries = [entry for entry in entries if entry.active]
+        return sorted(entries, key=lambda entry: entry.created_at, reverse=True)
 
 
 local_store = LocalStore()

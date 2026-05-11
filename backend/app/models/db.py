@@ -44,6 +44,7 @@ class LayoutRecord(Base):
 
     project: Mapped[ProjectRecord] = relationship(back_populates='layouts')
     changes: Mapped[list['LayoutChangeLog']] = relationship(back_populates='layout', cascade='all, delete-orphan')
+    schema_memory_entries: Mapped[list['SchemaMemoryEntryRecord']] = relationship(back_populates='source_layout', cascade='all, delete-orphan')
 
 
 class LayoutChangeLog(Base):
@@ -57,3 +58,22 @@ class LayoutChangeLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     layout: Mapped[LayoutRecord] = relationship(back_populates='changes')
+
+
+class SchemaMemoryEntryRecord(Base):
+    __tablename__ = 'schema_memory_entries'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    source_layout_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey('layouts.id', ondelete='CASCADE'))
+    flat_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    floor_area_sqm: Mapped[float | None] = mapped_column(nullable=True)
+    room_signature: Mapped[str] = mapped_column(Text, nullable=False)
+    before_schema_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    after_schema_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    rules_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    active: Mapped[bool] = mapped_column(nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    source_layout: Mapped[LayoutRecord] = relationship(back_populates='schema_memory_entries')

@@ -12,6 +12,11 @@ class ScaleInfo(BaseModel):
     confidence: str = 'estimated'
 
 
+class SchemaMemoryInfo(BaseModel):
+    applied_entry_ids: list[str] = Field(default_factory=list)
+    applied_summaries: list[str] = Field(default_factory=list)
+
+
 class Room(BaseModel):
     id: str
     name: str
@@ -37,6 +42,7 @@ class Opening(BaseModel):
     center: list[float] = Field(default_factory=list)
     width_m: float = 0.9
     height_m: float = 2.1
+    angle_deg: float | None = None
 
 
 class Furniture(BaseModel):
@@ -63,6 +69,7 @@ class LayoutSchema(BaseModel):
     windows: list[Opening] = Field(default_factory=list)
     furniture: list[Furniture] = Field(default_factory=list)
     todos: list[str] = Field(default_factory=list)
+    schema_memory: SchemaMemoryInfo | None = None
 
 
 class LayoutMetadata(BaseModel):
@@ -129,6 +136,7 @@ class UploadManifest(BaseModel):
 
 class SchemaPatchRequest(BaseModel):
     layout_schema: LayoutSchema = Field(alias='schema')
+    learn_from_edit: bool = False
 
     model_config = ConfigDict(validate_by_name=True, serialize_by_alias=True)
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 from app.core.config import Settings
@@ -17,6 +18,7 @@ from app.models.schema import (
     Opening,
     ProjectSummary,
     SchemaFixResponse,
+    SchemaMemoryInfo,
     UploadManifest,
     UploadResponse,
     Wall,
@@ -257,6 +259,8 @@ class ProjectService:
                     local_store.update_layout_schema(local.id, schema.model_dump(mode='json'))
                     layout_id = local.id
 
+                schema = await self._apply_schema_memory(schema, exclude_layout_id=layout_id)
+                await self.patch_schema(layout_id, schema)
                 self.storage.save_schema_snapshot(project_id, layout_slug, schema.model_dump_json(indent=2))
                 layout_ids.append(layout_id)
                 logger.info(
@@ -404,18 +408,187 @@ class ProjectService:
         else:
             local_store.update_project_manifest_url(project_id, manifest_url)
 
-    async def patch_schema(self, layout_id: UUID, schema: LayoutSchema) -> LayoutSummary | None:
+    async def patch_schema(self, layout_id: UUID, schema: LayoutSchema, learn_from_edit: bool = False) -> LayoutSummary | None:
+        previous_schema = await self._stored_schema(layout_id) if learn_from_edit else None
         if self.repository.enabled:
             row = await self.repository.update_layout_schema(layout_id, schema)
-            return self._layout_to_summary(row) if row else None
+            if not row:
+                return None
+            if previous_schema and self._has_structural_schema_change(previous_schema, schema):
+                await self._save_schema_memory_entry(layout_id, previous_schema, schema)
+            return self._layout_to_summary(row)
         row = local_store.update_layout_schema(layout_id, schema.model_dump(mode='json'))
-        return self._local_layout_to_summary(row) if row else None
+        if not row:
+            return None
+        if previous_schema and self._has_structural_schema_change(previous_schema, schema):
+            await self._save_schema_memory_entry(layout_id, previous_schema, schema)
+        return self._local_layout_to_summary(row)
+
+    async def _stored_schema(self, layout_id: UUID) -> LayoutSchema | None:
+        if self.repository.enabled:
+            row = await self.repository.get_layout(layout_id)
+            return LayoutSchema.model_validate(row.schema_json) if row else None
+        row = local_store.get_layout(layout_id)
+        return LayoutSchema.model_validate(row.schema_json) if row else None
+
+    @staticmethod
+    def _structural_schema_payload(schema: LayoutSchema) -> dict[str, Any]:
+        payload = schema.model_dump(mode='json')
+        return {
+            'rooms': payload.get('rooms', []),
+            'walls': payload.get('walls', []),
+            'windows': payload.get('windows', []),
+            'doors': payload.get('doors', []),
+        }
+
+    def _has_structural_schema_change(self, before: LayoutSchema, after: LayoutSchema) -> bool:
+        return self._structural_schema_payload(before) != self._structural_schema_payload(after)
+
+    async def _save_schema_memory_entry(self, layout_id: UUID, before: LayoutSchema, after: LayoutSchema) -> None:
+        rules = self._schema_memory_rules(before, after)
+        summary = self._schema_memory_summary(after, rules)
+        if not summary:
+            return
+        before_payload = before.model_dump(mode='json')
+        after_payload = after.model_dump(mode='json')
+        kwargs = {
+            'source_layout_id': layout_id,
+            'flat_type': after.flat_type,
+            'floor_area_sqm': after.floor_area_sqm,
+            'room_signature': self._room_signature(after),
+            'before_schema_json': before_payload,
+            'after_schema_json': after_payload,
+            'rules_json': rules,
+            'summary': summary,
+        }
+        if self.repository.enabled:
+            await self.repository.create_schema_memory_entry(**kwargs)
+        else:
+            local_store.create_schema_memory_entry(**kwargs)
+        logger.info('schema_memory.saved layout_id=%s summary=%s', layout_id, summary)
+
+    def _schema_memory_rules(self, before: LayoutSchema, after: LayoutSchema) -> dict[str, Any]:
+        before_payload = self._structural_schema_payload(before)
+        after_payload = self._structural_schema_payload(after)
+        rules: dict[str, Any] = {
+            'changed_counts': {},
+            'changed_room_labels': [],
+        }
+        for key in ('rooms', 'walls', 'windows', 'doors'):
+            before_count = len(before_payload[key])
+            after_count = len(after_payload[key])
+            if before_count != after_count:
+                rules['changed_counts'][key] = {'before': before_count, 'after': after_count}
+        before_rooms = {room.id: room for room in before.rooms}
+        for room in after.rooms:
+            before_room = before_rooms.get(room.id)
+            if before_room and (before_room.name != room.name or before_room.type != room.type):
+                rules['changed_room_labels'].append({'id': room.id, 'before': before_room.name, 'after': room.name, 'type': room.type})
+        if before_payload != after_payload and not rules['changed_counts'] and not rules['changed_room_labels']:
+            rules['geometry_adjusted'] = True
+        return rules
+
+    def _schema_memory_summary(self, schema: LayoutSchema, rules: dict[str, Any]) -> str:
+        parts: list[str] = []
+        room_text = ' '.join(f'{room.name} {room.type}' for room in schema.rooms).lower()
+        counts = rules.get('changed_counts', {})
+        if 'service' in room_text and 'yard' in room_text and counts.get('walls'):
+            parts.append('service yard partition')
+        if ('bath' in room_text or 'wc' in room_text or 'bathroom' in room_text) and (counts.get('windows') or counts.get('walls')):
+            parts.append('WC windowed wall alignment')
+        for key, value in counts.items():
+            before_count = value.get('before')
+            after_count = value.get('after')
+            if after_count > before_count:
+                parts.append(f'added {key}')
+            elif after_count < before_count:
+                parts.append(f'removed {key}')
+            else:
+                parts.append(f'adjusted {key}')
+        labels = rules.get('changed_room_labels') or []
+        if labels:
+            parts.append('corrected room labels')
+        if rules.get('geometry_adjusted'):
+            parts.append('adjusted room/wall/window geometry')
+        return 'Saved schema correction: ' + ', '.join(parts[:4]) if parts else ''
+
+    @staticmethod
+    def _room_signature(schema: LayoutSchema) -> str:
+        labels = sorted(
+            (room.name or room.type or room.id).strip().lower()
+            for room in schema.rooms
+            if (room.name or room.type or room.id).strip()
+        )
+        return '|'.join(labels)
+
+    async def _schema_memory_matches(self, schema: LayoutSchema, exclude_layout_id: UUID | None = None) -> list[object]:
+        entries = await self.repository.list_schema_memory_entries() if self.repository.enabled else local_store.list_schema_memory_entries()
+        scored: list[tuple[float, object]] = []
+        target_rooms = set(self._room_signature(schema).split('|')) - {''}
+        target_flat = (schema.flat_type or '').strip().lower()
+        target_area = schema.floor_area_sqm
+        for entry in entries:
+            if exclude_layout_id and getattr(entry, 'source_layout_id', None) == exclude_layout_id:
+                continue
+            score = 0.0
+            entry_flat = (getattr(entry, 'flat_type', None) or '').strip().lower()
+            if target_flat and entry_flat and target_flat == entry_flat:
+                score += 0.45
+            entry_area = getattr(entry, 'floor_area_sqm', None)
+            if target_area and entry_area:
+                delta = abs(float(target_area) - float(entry_area))
+                score += max(0.0, 0.25 - min(delta / 80.0, 0.25))
+            entry_rooms = set(str(getattr(entry, 'room_signature', '')).split('|')) - {''}
+            if target_rooms and entry_rooms:
+                score += 0.30 * (len(target_rooms & entry_rooms) / len(target_rooms | entry_rooms))
+            if score >= 0.12:
+                scored.append((score, entry))
+        return [entry for _, entry in sorted(scored, key=lambda item: item[0], reverse=True)[:3]]
+
+    async def _apply_schema_memory(self, schema: LayoutSchema, exclude_layout_id: UUID | None = None) -> LayoutSchema:
+        entries = await self._schema_memory_matches(schema, exclude_layout_id=exclude_layout_id)
+        if not entries:
+            return schema
+
+        memory_payload = [
+            {
+                'id': str(getattr(entry, 'id')),
+                'summary': getattr(entry, 'summary', ''),
+                'rules': getattr(entry, 'rules_json', {}),
+                'before_schema': getattr(entry, 'before_schema_json', {}),
+                'after_schema': getattr(entry, 'after_schema_json', {}),
+            }
+            for entry in entries
+        ]
+        prompt = (
+            'Auto improve this newly extracted HDB 2D semantic schema using saved schema memory. '
+            'Apply only corrections that clearly match the current layout. Preserve required fields and return full schema JSON. '
+            f'schema_memory_examples={memory_payload}'
+        )
+        try:
+            improved, _ = self.llm_editor.apply_fix(schema, prompt, None)
+        except Exception:  # noqa: BLE001
+            logger.exception('schema_memory.apply_failed layout_id=%s', schema.layout_id)
+            improved = schema
+        summaries = [str(getattr(entry, 'summary', 'Saved schema correction')).strip() for entry in entries]
+        info = SchemaMemoryInfo(
+            applied_entry_ids=[str(getattr(entry, 'id')) for entry in entries],
+            applied_summaries=[summary for summary in summaries if summary],
+        )
+        improved = improved.model_copy(update={'schema_memory': info})
+        logger.info('schema_memory.applied layout_id=%s entries=%d', schema.layout_id, len(entries))
+        return improved
 
     async def fix_schema_from_prompt(self, layout_id: UUID, prompt: str, object_id: str | None) -> SchemaFixResponse | None:
         layout = await self.get_layout(layout_id)
         if not layout:
             return None
-        updated_schema, diff = self.llm_editor.apply_fix(layout.layout_schema, prompt, object_id)
+        source_schema = layout.layout_schema
+        if 'auto improve' in prompt.lower():
+            source_schema = await self._apply_schema_memory(source_schema, exclude_layout_id=layout_id)
+        updated_schema, diff = self.llm_editor.apply_fix(source_schema, prompt, object_id)
+        if source_schema.schema_memory and not updated_schema.schema_memory:
+            updated_schema = updated_schema.model_copy(update={'schema_memory': source_schema.schema_memory})
         await self.patch_schema(layout_id, updated_schema)
 
         change_id = None
@@ -491,6 +664,7 @@ class ProjectService:
                 'todos': regenerated.todos,
             }
         )
+        schema = await self._apply_schema_memory(schema, exclude_layout_id=layout_id)
         await self.patch_schema(layout_id, schema)
         logger.info('reextract.complete layout_id=%s rooms=%d walls=%d', layout_id, len(schema.rooms), len(schema.walls))
         return ExtractionResponse(layout_id=layout_id, layout_schema=schema)
@@ -577,6 +751,7 @@ class ProjectService:
                         'todos': list(dict.fromkeys(schema.todos + regenerated.todos)),
                     }
                 )
+                schema = await self._apply_schema_memory(schema, exclude_layout_id=layout_id)
                 await self.patch_schema(layout_id, schema)
 
         output_path = self.storage.project_dir(layout.project_id) / 'glb' / f'{layout_id}.glb'

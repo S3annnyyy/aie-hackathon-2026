@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
-from app.models.db import LayoutChangeLog, LayoutRecord, ProjectRecord
+from app.models.db import LayoutChangeLog, LayoutRecord, ProjectRecord, SchemaMemoryEntryRecord
 from app.models.schema import LayoutSchema
 
 
@@ -192,3 +192,41 @@ class Repository:
             await session.commit()
             await session.refresh(row)
             return row
+
+    async def create_schema_memory_entry(
+        self,
+        *,
+        source_layout_id: UUID,
+        flat_type: str | None,
+        floor_area_sqm: float | None,
+        room_signature: str,
+        before_schema_json: dict[str, Any],
+        after_schema_json: dict[str, Any],
+        rules_json: dict[str, Any],
+        summary: str,
+    ) -> SchemaMemoryEntryRecord:
+        assert self.session_factory is not None
+        async with self.session_factory() as session:
+            row = SchemaMemoryEntryRecord(
+                source_layout_id=source_layout_id,
+                flat_type=flat_type,
+                floor_area_sqm=floor_area_sqm,
+                room_signature=room_signature,
+                before_schema_json=before_schema_json,
+                after_schema_json=after_schema_json,
+                rules_json=rules_json,
+                summary=summary,
+            )
+            session.add(row)
+            await session.commit()
+            await session.refresh(row)
+            return row
+
+    async def list_schema_memory_entries(self, *, active_only: bool = True) -> list[SchemaMemoryEntryRecord]:
+        assert self.session_factory is not None
+        async with self.session_factory() as session:
+            stmt = select(SchemaMemoryEntryRecord).order_by(SchemaMemoryEntryRecord.created_at.desc())
+            if active_only:
+                stmt = stmt.where(SchemaMemoryEntryRecord.active.is_(True))
+            rows = (await session.scalars(stmt)).all()
+            return list(rows)
